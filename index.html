@@ -186,6 +186,19 @@ input,select,textarea,button{font-family:var(--font-body);font-size:14px}
 /* LOADING */
 .loading{text-align:center;padding:4rem;color:var(--muted)}
 
+/* PLAYER HOVER CARD */
+#player-hover-card{position:fixed;z-index:1000;background:var(--surface);border:1px solid var(--border2);border-radius:14px;padding:16px;width:310px;box-shadow:0 12px 40px rgba(0,0,0,.6);display:none;pointer-events:none}
+.pcg{display:flex;align-items:baseline;gap:6px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px}
+.pcg:last-child{border-bottom:none}
+.pcg-date{color:var(--muted);width:46px;flex-shrink:0;font-size:11px}
+.pcg-opp{color:var(--muted);width:56px;flex-shrink:0;font-size:11px}
+.pcg-stats{flex:1;color:var(--text)}
+.pcg-fp{font-family:var(--font-head);font-weight:700;width:48px;text-align:right;flex-shrink:0;font-size:13px}
+
+/* TEAM MODAL */
+#team-modal{display:none;position:fixed;inset:0;z-index:900;background:rgba(0,0,0,.75);align-items:center;justify-content:center}
+.team-modal-box{background:var(--surface);border:1px solid var(--border2);border-radius:16px;padding:24px;width:min(480px,92vw);max-height:82vh;overflow-y:auto;position:relative}
+
 @media(max-width:600px){
   .topbar{padding:12px 16px;gap:10px}
   .content{padding:16px}
@@ -528,7 +541,9 @@ function startApp() {
   });
 }
 
+let _lastLeague = {};
 function renderAll(league) {
+  _lastLeague = league;
   document.getElementById('topbar-league-name').textContent = league.name || 'My Fantasy League';
   renderStandings(league);
   renderPool(league);
@@ -576,7 +591,7 @@ function renderStandings(league) {
     '<div class="stat-box"><div class="stat-n">' + Object.keys(league.pool||{}).length + '</div><div class="stat-l">In pool</div></div>' +
     '<div class="stat-box"><div class="stat-n">' + members.reduce((s,m)=>s+Object.keys(m.roster||{}).length,0) + '</div><div class="stat-l">Total drafted</div></div>';
   document.getElementById('standings-list').innerHTML = members.map((m,i) =>
-    '<div class="lb-row">' +
+    '<div class="lb-row" onclick="showTeamRoster(\'' + encodeURIComponent(m.name).replace(/'/g,'%27') + '\')" style="cursor:pointer" title="View ' + m.name + '\'s team">' +
       '<div class="lb-rank ' + (i===0?'r1':i===1?'r2':i===2?'r3':'') + '">' + (rankLabel[i]||(i+1)) + '</div>' +
       '<div class="avatar" style="background:' + m.color + '22;color:' + m.color + '">' + initials(m.name) + '</div>' +
       '<div class="flex1">' +
@@ -599,7 +614,7 @@ function renderPool(league) {
     return '<span class="player-chip">' +
       '<span class="sport-dot" style="background:' + (SPORT_COLORS[p.sport]||'#aaa') + '"></span>' +
       (p.photo ? '<img src="' + p.photo + '" style="width:20px;height:20px;border-radius:50%;object-fit:cover" onerror="this.style.display=\'none\'">' : '') +
-      '<span onclick="draftPlayer(\'' + ek + '\')" style="cursor:pointer">' + p.name + '</span>' +
+      '<span onclick="draftPlayer(\'' + ek + '\')" ' + (p.id && SPORT_API[p.sport] ? 'onmouseenter="showPlayerCard(event,\'' + p.id + '\',\'' + p.sport + '\')" onmouseleave="hidePlayerCard()"' : '') + ' style="cursor:pointer">' + p.name + '</span>' +
       '<span class="chip-pos">' + (p.pos||'') + '</span>' +
       '<span style="font-size:11px;color:var(--muted)">' + (p.sport||'').toUpperCase() + '</span>' +
       '<span onclick="draftPlayer(\'' + ek + '\')" style="font-size:16px;color:var(--accent);margin-left:2px;cursor:pointer">+</span>' +
@@ -619,7 +634,7 @@ function renderRoster(league) {
     '<div class="roster-row">' +
       '<span class="sport-dot" style="background:' + (SPORT_COLORS[p.sport]||'#aaa') + '"></span>' +
       (p.photo ? '<img src="' + p.photo + '" style="width:32px;height:32px;border-radius:50%;object-fit:cover;margin-right:4px" onerror="this.style.display=\'none\'">' : '') +
-      '<div class="flex1"><div class="roster-name">' + p.name + '</div>' +
+      '<div class="flex1"><div class="roster-name" ' + (p.id && SPORT_API[p.sport] ? 'onmouseenter="showPlayerCard(event,\'' + p.id + '\',\'' + p.sport + '\')" onmouseleave="hidePlayerCard()"' : '') + '>' + p.name + '</div>' +
       '<div style="font-size:12px;color:var(--muted)">' + (p.sport||'').toUpperCase() + ' · ' + (p.pos||'') + '</div></div>' +
       '<button class="drop-btn" onclick="dropPlayer(\'' + encodeURIComponent(key) + '\')" title="Drop">&#10005;</button>' +
     '</div>').join('');
@@ -1053,6 +1068,137 @@ async function syncScores() {
 const savedName = localStorage.getItem('rl_name');
 const savedCode = localStorage.getItem('rl_code');
 if (savedName && savedCode) { myName = savedName; leagueCode = savedCode; startApp(); }
+
+// ─── PLAYER HOVER CARD ───────────────────────────────────────────────────────
+const _cardCache = {};
+let _cardHideTimer = null;
+
+function showPlayerCard(e, id, sport) {
+  clearTimeout(_cardHideTimer);
+  if (!id || !SPORT_API[sport]) return;
+  const card = document.getElementById('player-hover-card');
+  const content = document.getElementById('player-card-content');
+
+  const x = e.clientX + 18;
+  const y = e.clientY + 10;
+  card.style.left = (x + 320 > window.innerWidth ? e.clientX - 328 : x) + 'px';
+  card.style.top  = Math.min(y, window.innerHeight - 260) + 'px';
+  card.style.display = 'block';
+
+  if (_cardCache[id]) { renderCardContent(content, _cardCache[id], sport); return; }
+
+  content.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:8px 0">Loading…</div>';
+  const cfg = SPORT_API[sport];
+  fetch('https://site.api.espn.com/apis/site/v2/sports/' + cfg.sport + '/' + cfg.league + '/athletes/' + id + '/gamelog')
+    .then(r => r.json())
+    .then(data => {
+      console.log('[gamelog]', sport, id, data);
+      _cardCache[id] = parseGamelog(data, sport);
+      if (document.getElementById('player-hover-card').style.display !== 'none') {
+        renderCardContent(content, _cardCache[id], sport);
+      }
+    })
+    .catch(() => { content.innerHTML = '<div style="color:var(--muted);font-size:13px">Stats unavailable</div>'; });
+}
+
+function hidePlayerCard() {
+  _cardHideTimer = setTimeout(() => { document.getElementById('player-hover-card').style.display = 'none'; }, 200);
+}
+
+function parseGamelog(data, sport) {
+  const events = [];
+  for (const st of (data.seasonTypes || [])) {
+    for (const cat of (st.categories || [])) {
+      if (!cat.events || !cat.names) continue;
+      for (const ev of cat.events) events.push({ ...ev, _names: cat.names });
+    }
+  }
+  if (!events.length) for (const ev of (data.events || [])) events.push(ev);
+  return events.slice(-5).reverse();
+}
+
+function renderCardContent(el, games, sport) {
+  if (!games || !games.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:8px 0">No recent games found</div>';
+    return;
+  }
+  let total = 0;
+  const rows = games.map(ev => {
+    const names = ev._names || ev.names || [];
+    const stats = ev.stats || [];
+    let fp = 0, statStr = '';
+    if (sport === 'nba') {
+      fp = calcNBA(stats, names);
+      statStr = getStat(stats,names,'PTS') + '/' + getStat(stats,names,'REB') + '/' + getStat(stats,names,'AST') + ' P/R/A';
+    } else if (sport === 'mlb') {
+      const pit = (names[0]||'').toUpperCase() === 'IP' || (names[0]||'').toLowerCase().includes('inn');
+      if (pit) { fp = calcMLBPitching(stats, names); statStr = getStat(stats,names,'IP') + 'IP ' + getStat(stats,names,'K','SO') + 'K ' + getStat(stats,names,'ER') + 'ER'; }
+      else     { fp = calcMLBBatting(stats, names);  statStr = getStat(stats,names,'H') + 'H ' + getStat(stats,names,'HR') + 'HR ' + getStat(stats,names,'RBI') + 'RBI'; }
+    } else if (sport === 'nhl') {
+      fp = calcNHL(stats, names);
+      statStr = getStat(stats,names,'G','goals') + 'G ' + getStat(stats,names,'A','assists') + 'A ' + getStat(stats,names,'SOG','S','shots') + 'SOG';
+    }
+    total += fp;
+    const opp   = (ev.atVs === '@' ? '@ ' : 'vs ') + (ev.opponentAbbrev || '?');
+    const date  = (ev.gameDate || '').replace(/,?\s*\d{4}/, '').replace(/\s+/g,' ').trim();
+    const fpCol = fp > 0 ? 'var(--accent2)' : fp < 0 ? 'var(--red)' : 'var(--muted)';
+    return '<div class="pcg">' +
+      '<span class="pcg-date">' + date + '</span>' +
+      '<span class="pcg-opp">'  + opp  + '</span>' +
+      '<span class="pcg-stats">' + statStr + '</span>' +
+      '<span class="pcg-fp" style="color:' + fpCol + '">' + (fp > 0 ? '+' : '') + fp + '</span>' +
+    '</div>';
+  }).join('');
+
+  const avg = Math.round(total / games.length * 10) / 10;
+  el.innerHTML =
+    '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:8px">Last ' + games.length + ' games · ' + sport.toUpperCase() + '</div>' +
+    '<div style="display:flex;font-size:10px;color:var(--muted);padding-bottom:4px;border-bottom:1px solid var(--border)">' +
+      '<span style="width:46px">Date</span><span style="width:56px">Opp</span><span style="flex:1">Stats</span><span style="width:48px;text-align:right">FP</span>' +
+    '</div>' + rows +
+    '<div style="display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--muted)">' +
+      '<span>Avg / game</span>' +
+      '<span style="font-family:var(--font-head);font-weight:700;color:var(--accent2)">' + avg + ' FP</span>' +
+    '</div>';
+}
+
+// ─── TEAM ROSTER MODAL ────────────────────────────────────────────────────────
+function showTeamRoster(encodedName) {
+  const memberName = decodeURIComponent(encodedName);
+  const member = (_lastLeague.members || {})[memberName];
+  if (!member) return;
+  document.getElementById(‘team-modal-title’).textContent = memberName + ‘\’s team’;
+  const roster = Object.entries(member.roster || {});
+  document.getElementById('team-modal-content').innerHTML = roster.length
+    ? roster.map(([, p]) => {
+        const hov = p.id && SPORT_API[p.sport]
+          ? ' onmouseenter="showPlayerCard(event,\'' + p.id + '\',\'' + p.sport + '\')" onmouseleave="hidePlayerCard()" style="cursor:default"'
+          : '';
+        return '<div class="roster-row">' +
+          '<span class="sport-dot" style="background:' + (SPORT_COLORS[p.sport]||'#aaa') + '"></span>' +
+          (p.photo ? '<img src="' + p.photo + '" style="width:32px;height:32px;border-radius:50%;object-fit:cover;margin-right:4px" onerror="this.style.display=\'none\'">' : '') +
+          '<div class="flex1"><div class="roster-name"' + hov + '>' + p.name + '</div>' +
+          '<div style="font-size:12px;color:var(--muted)">' + (p.sport||'').toUpperCase() + ' · ' + (p.pos||'') + '</div></div>' +
+        '</div>';
+      }).join('')
+    : '<div class="empty">No players drafted yet</div>';
+  document.getElementById('team-modal').style.display = 'flex';
+}
+
+function closeTeamModal() { document.getElementById('team-modal').style.display = 'none'; }
+// ─────────────────────────────────────────────────────────────────────────────
 </script>
+
+<!-- PLAYER HOVER CARD -->
+<div id="player-hover-card"><div id="player-card-content"></div></div>
+
+<!-- TEAM ROSTER MODAL -->
+<div id="team-modal" onclick="if(event.target===this)closeTeamModal()">
+  <div class="team-modal-box">
+    <button onclick="closeTeamModal()" style="position:absolute;top:14px;right:14px;background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1">&#10005;</button>
+    <div id="team-modal-title" style="font-family:var(--font-head);font-size:18px;font-weight:800;margin-bottom:16px"></div>
+    <div id="team-modal-content"></div>
+  </div>
+</div>
 </body>
 </html>
