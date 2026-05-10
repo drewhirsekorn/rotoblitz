@@ -99,8 +99,11 @@ input,select,textarea,button{font-family:var(--font-body);font-size:14px}
 .player-chip:hover{border-color:var(--accent);background:rgba(124,110,245,.1)}
 .sport-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .chip-pos{font-size:11px;color:var(--muted)}
-.add-form{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.add-form .field-full{grid-column:1/-1}
+.search-results{position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border2);border-radius:10px;z-index:100;overflow:hidden;margin-top:4px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.search-result{display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;transition:background .15s}
+.search-result:hover{background:var(--surface2)}
+.search-result-img{width:36px;height:36px;border-radius:50%;object-fit:cover;background:var(--surface2);flex-shrink:0}
+.search-result-league{font-size:10px;background:var(--surface2);border-radius:4px;padding:2px 7px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);flex-shrink:0}
 .field{margin-bottom:0}
 .field label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:5px;font-weight:500}
 .field input,.field select{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);outline:none;transition:border .2s}
@@ -230,25 +233,11 @@ input,select,textarea,button{font-family:var(--font-body);font-size:14px}
       </div>
       <div class="card">
         <div class="card-title">Add player to pool</div>
-        <div class="add-form">
-          <div class="field"><label>Player name</label><input type="text" id="np-name" placeholder="e.g. Patrick Mahomes"></div>
-          <div class="field"><label>Sport</label>
-            <select id="np-sport">
-              <option value="nfl">NFL Football</option>
-              <option value="nba">NBA Basketball</option>
-              <option value="mlb">MLB Baseball</option>
-              <option value="nhl">NHL Hockey</option>
-              <option value="nfl">NFL Football</option>
-              <option value="mls">MLS Soccer</option>
-              <option value="pga">PGA Golf</option>
-              <option value="tennis">Tennis</option>
-              <option value="other">Other</option>
-            </select>
-          </div>
-          <div class="field"><label>Position</label><input type="text" id="np-pos" placeholder="QB, PG, OF, C, FWD..."></div>
-          <div class="field"><label>Team (optional)</label><input type="text" id="np-team" placeholder="e.g. Kansas City Chiefs"></div>
+        <div class="field" style="position:relative">
+          <label>Search by name</label>
+          <input type="text" id="player-search" placeholder="e.g. Patrick Mahomes" autocomplete="off" oninput="searchPlayers(this.value)">
+          <div class="search-results" id="search-results" style="display:none"></div>
         </div>
-        <button class="btn btn-accent btn-block" onclick="addToPool()">Add to pool</button>
       </div>
     </div>
 
@@ -545,17 +534,18 @@ function renderStandings(league) {
 }
 
 function renderPool(league) {
-  const pool = Object.values(league.pool || {});
+  const pool = Object.entries(league.pool || {});
   const poolEl = document.getElementById('draft-pool');
   const emptyEl = document.getElementById('draft-empty');
   if (!pool.length) { poolEl.innerHTML = ''; emptyEl.style.display = 'block'; return; }
   emptyEl.style.display = 'none';
-  poolEl.innerHTML = pool.map(p =>
-    '<span class="player-chip" onclick="draftPlayer(\'' + encodeURIComponent(p.name) + '\')">' +
+  poolEl.innerHTML = pool.map(([key, p]) =>
+    '<span class="player-chip" onclick="draftPlayer(\'' + encodeURIComponent(key) + '\')">' +
       '<span class="sport-dot" style="background:' + (SPORT_COLORS[p.sport]||'#aaa') + '"></span>' +
+      (p.photo ? '<img src="' + p.photo + '" style="width:20px;height:20px;border-radius:50%;object-fit:cover" onerror="this.style.display=\'none\'">' : '') +
       '<span>' + p.name + '</span>' +
-      '<span class="chip-pos">' + p.pos + '</span>' +
-      '<span style="font-size:11px;color:var(--muted)">' + p.sport.toUpperCase() + '</span>' +
+      '<span class="chip-pos">' + (p.pos||'') + '</span>' +
+      '<span style="font-size:11px;color:var(--muted)">' + (p.sport||'').toUpperCase() + '</span>' +
       '<span style="font-size:16px;color:var(--accent);margin-left:2px">+</span>' +
     '</span>').join('');
 }
@@ -565,14 +555,15 @@ function renderRoster(league) {
   if (!me) return;
   document.getElementById('roster-title').textContent = myName + "'s roster";
   document.getElementById('roster-pts').innerHTML = me.score + ' <span style="font-size:13px;font-weight:400;color:var(--muted)">pts</span>';
-  const roster = Object.values(me.roster||{});
+  const roster = Object.entries(me.roster||{});
   if (!roster.length) { document.getElementById('my-roster-list').innerHTML = '<div class="empty"><div class="empty-icon">\u{1F4CB}</div>Head to Draft to pick your players</div>'; return; }
-  document.getElementById('my-roster-list').innerHTML = roster.map(p =>
+  document.getElementById('my-roster-list').innerHTML = roster.map(([key, p]) =>
     '<div class="roster-row">' +
       '<span class="sport-dot" style="background:' + (SPORT_COLORS[p.sport]||'#aaa') + '"></span>' +
+      (p.photo ? '<img src="' + p.photo + '" style="width:32px;height:32px;border-radius:50%;object-fit:cover;margin-right:4px" onerror="this.style.display=\'none\'">' : '') +
       '<div class="flex1"><div class="roster-name">' + p.name + '</div>' +
-      '<div style="font-size:12px;color:var(--muted)">' + p.sport.toUpperCase() + ' · ' + p.pos + '</div></div>' +
-      '<button class="drop-btn" onclick="dropPlayer(\'' + encodeURIComponent(p.name) + '\')" title="Drop">&#10005;</button>' +
+      '<div style="font-size:12px;color:var(--muted)">' + (p.sport||'').toUpperCase() + ' · ' + (p.pos||'') + '</div></div>' +
+      '<button class="drop-btn" onclick="dropPlayer(\'' + encodeURIComponent(key) + '\')" title="Drop">&#10005;</button>' +
     '</div>').join('');
 }
 
@@ -599,41 +590,89 @@ function renderLog(league) {
     : '<div class="empty" style="padding:1rem">No points awarded yet</div>';
 }
 
-async function draftPlayer(encodedName) {
-  const name = decodeURIComponent(encodedName);
+async function draftPlayer(encodedKey) {
+  const key = decodeURIComponent(encodedKey);
   setSyncing(true);
-  const snap = await db.ref('leagues/' + leagueCode + '/pool/' + name).once('value');
+  const snap = await db.ref('leagues/' + leagueCode + '/pool/' + key).once('value');
   if (!snap.exists()) { setSyncing(false); toast('Player already drafted!'); return; }
   const p = snap.val();
-  await db.ref('leagues/' + leagueCode + '/pool/' + name).remove();
-  await db.ref('leagues/' + leagueCode + '/members/' + myName + '/roster/' + name).set(p);
-  toast(name + ' drafted!');
+  await db.ref('leagues/' + leagueCode + '/pool/' + key).remove();
+  await db.ref('leagues/' + leagueCode + '/members/' + myName + '/roster/' + key).set(p);
+  toast(p.name + ' drafted!');
 }
 
-async function dropPlayer(encodedName) {
-  const name = decodeURIComponent(encodedName);
+async function dropPlayer(encodedKey) {
+  const key = decodeURIComponent(encodedKey);
   setSyncing(true);
-  const snap = await db.ref('leagues/' + leagueCode + '/members/' + myName + '/roster/' + name).once('value');
+  const snap = await db.ref('leagues/' + leagueCode + '/members/' + myName + '/roster/' + key).once('value');
   if (!snap.exists()) { setSyncing(false); return; }
   const p = snap.val();
-  await db.ref('leagues/' + leagueCode + '/members/' + myName + '/roster/' + name).remove();
-  await db.ref('leagues/' + leagueCode + '/pool/' + name).set(p);
-  toast(name + ' dropped back to pool');
+  await db.ref('leagues/' + leagueCode + '/members/' + myName + '/roster/' + key).remove();
+  await db.ref('leagues/' + leagueCode + '/pool/' + key).set(p);
+  toast(p.name + ' dropped back to pool');
 }
 
-async function addToPool() {
-  const name = document.getElementById('np-name').value.trim();
-  const sport = document.getElementById('np-sport').value;
-  const pos = document.getElementById('np-pos').value.trim() || '—';
-  const team = document.getElementById('np-team').value.trim();
-  if (!name) return;
-  setSyncing(true);
-  await db.ref('leagues/' + leagueCode + '/pool/' + name).set({ name, sport, pos, team });
-  document.getElementById('np-name').value = '';
-  document.getElementById('np-pos').value = '';
-  document.getElementById('np-team').value = '';
-  toast(name + ' added to pool');
+let _searchResults = {};
+let _searchTimeout = null;
+
+async function searchPlayers(query) {
+  const resultsEl = document.getElementById('search-results');
+  clearTimeout(_searchTimeout);
+  if (query.length < 2) { resultsEl.style.display = 'none'; return; }
+  _searchTimeout = setTimeout(async () => {
+    try {
+      const res = await fetch('https://site.api.espn.com/apis/search/v2?query=' + encodeURIComponent(query) + '&limit=10');
+      const data = await res.json();
+      const playerGroup = (data.results || []).find(r => r.type === 'player');
+      const players = playerGroup ? playerGroup.contents : [];
+      _searchResults = {};
+      players.forEach(p => _searchResults[p.id] = p);
+      if (!players.length) {
+        resultsEl.innerHTML = '<div style="padding:12px 14px;color:var(--muted);font-size:13px">No players found</div>';
+      } else {
+        resultsEl.innerHTML = players.slice(0, 8).map(p =>
+          '<div class="search-result" onclick="addPlayerToPool(\'' + p.id + '\')">' +
+            '<img class="search-result-img" src="' + (p.image && p.image.default ? p.image.default : '') + '" onerror="this.style.display=\'none\'">' +
+            '<div style="flex:1;min-width:0">' +
+              '<div style="font-weight:500;font-size:14px">' + p.displayName + '</div>' +
+              '<div style="font-size:12px;color:var(--muted);margin-top:1px">' + (p.subtitle || '') + '</div>' +
+            '</div>' +
+            '<span class="search-result-league">' + (p.defaultLeagueSlug || p.description || '').toUpperCase() + '</span>' +
+          '</div>'
+        ).join('');
+      }
+      resultsEl.style.display = 'block';
+    } catch(e) {
+      resultsEl.innerHTML = '<div style="padding:12px 14px;color:var(--muted);font-size:13px">Search unavailable</div>';
+      resultsEl.style.display = 'block';
+    }
+  }, 300);
 }
+
+async function addPlayerToPool(id) {
+  const player = _searchResults[id];
+  if (!player) return;
+  document.getElementById('search-results').style.display = 'none';
+  document.getElementById('player-search').value = '';
+  const sport = (player.defaultLeagueSlug || 'other').toLowerCase();
+  setSyncing(true);
+  await db.ref('leagues/' + leagueCode + '/pool/' + player.id).set({
+    id: player.id,
+    name: player.displayName,
+    sport: sport,
+    pos: '—',
+    team: player.subtitle || '',
+    photo: (player.image && player.image.default) || ''
+  });
+  toast(player.displayName + ' added to pool');
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#player-search') && !e.target.closest('#search-results')) {
+    const el = document.getElementById('search-results');
+    if (el) el.style.display = 'none';
+  }
+});
 
 async function sendChat() {
   const input = document.getElementById('chat-input');
