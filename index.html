@@ -590,13 +590,14 @@ function renderPool(league) {
   if (!pool.length) { poolEl.innerHTML = ''; emptyEl.style.display = 'block'; return; }
   emptyEl.style.display = 'none';
   poolEl.innerHTML = pool.map(([key, p]) =>
-    '<span class="player-chip" onclick="draftPlayer(\'' + encodeURIComponent(key) + '\')">' +
+    '<span class="player-chip">' +
       '<span class="sport-dot" style="background:' + (SPORT_COLORS[p.sport]||'#aaa') + '"></span>' +
       (p.photo ? '<img src="' + p.photo + '" style="width:20px;height:20px;border-radius:50%;object-fit:cover" onerror="this.style.display=\'none\'">' : '') +
-      '<span>' + p.name + '</span>' +
+      '<span onclick="draftPlayer(\'' + encodeURIComponent(key) + '\')" style="cursor:pointer">' + p.name + '</span>' +
       '<span class="chip-pos">' + (p.pos||'') + '</span>' +
       '<span style="font-size:11px;color:var(--muted)">' + (p.sport||'').toUpperCase() + '</span>' +
-      '<span style="font-size:16px;color:var(--accent);margin-left:2px">+</span>' +
+      '<span onclick="draftPlayer(\'' + encodeURIComponent(key) + '\')" style="font-size:16px;color:var(--accent);margin-left:2px;cursor:pointer">+</span>' +
+      '<span onclick="removeFromPool(\'' + encodeURIComponent(key) + '\')" style="font-size:14px;color:var(--muted);margin-left:4px;cursor:pointer;line-height:1" title="Remove">&#10005;</span>' +
     '</span>').join('');
 }
 
@@ -660,6 +661,12 @@ async function dropPlayer(encodedKey) {
   await db.ref('leagues/' + leagueCode + '/members/' + myName + '/roster/' + key).remove();
   await db.ref('leagues/' + leagueCode + '/pool/' + key).set(p);
   toast(p.name + ' dropped back to pool');
+}
+
+async function removeFromPool(encodedKey) {
+  const key = decodeURIComponent(encodedKey);
+  setSyncing(true);
+  await db.ref('leagues/' + leagueCode + '/pool/' + key).remove();
 }
 
 let _searchResults = {};
