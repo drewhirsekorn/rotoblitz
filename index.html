@@ -1167,7 +1167,7 @@ function showTeamRoster(encodedName) {
   const memberName = decodeURIComponent(encodedName);
   const member = (_lastLeague.members || {})[memberName];
   if (!member) return;
-  document.getElementById(‘team-modal-title’).textContent = memberName + ‘\’s team’;
+  document.getElementById('team-modal-title').textContent = memberName + '\'s team';
   const roster = Object.entries(member.roster || {});
   document.getElementById('team-modal-content').innerHTML = roster.length
     ? roster.map(([, p]) => {
