@@ -666,7 +666,14 @@ async function dropPlayer(encodedKey) {
 async function removeFromPool(encodedKey) {
   const key = decodeURIComponent(encodedKey);
   setSyncing(true);
-  await db.ref('leagues/' + leagueCode + '/pool/' + key).remove();
+  try {
+    await db.ref('leagues/' + leagueCode + '/pool').child(key).remove();
+    toast('Removed from pool');
+  } catch(e) {
+    toast('Error: ' + e.message);
+  } finally {
+    setSyncing(false);
+  }
 }
 
 let _searchResults = {};
