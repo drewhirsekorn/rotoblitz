@@ -87,6 +87,26 @@ input,select,textarea,button{font-family:var(--font-body);font-size:14px}
 .bar-fill{height:100%;border-radius:99px;transition:width .6s ease}
 .you-tag{font-size:10px;background:var(--accent);color:#fff;border-radius:4px;padding:1px 6px;font-weight:600;letter-spacing:.04em;margin-left:6px;vertical-align:middle}
 
+/* STANDINGS LAYOUT */
+.standings-layout{display:grid;grid-template-columns:1fr 290px;gap:16px;align-items:start}
+@media(max-width:750px){.standings-layout{grid-template-columns:1fr}}
+
+/* TICKER */
+.ticker-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;position:sticky;top:16px}
+.ticker-header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.ticker-title{font-family:var(--font-head);font-size:14px;font-weight:700;flex:1}
+.ticker-live{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;flex-shrink:0}
+.ticker-feed{max-height:520px;overflow-y:auto}
+.ticker-item{padding:10px 16px;border-bottom:1px solid var(--border);animation:fadeIn .4s ease}
+.ticker-item:last-child{border-bottom:none}
+.ticker-row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.ticker-who{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticker-pts{font-family:var(--font-head);font-weight:800;font-size:15px;flex-shrink:0}
+.ticker-pts.pos{color:var(--accent2)}.ticker-pts.neg{color:var(--red)}
+.ticker-desc{font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticker-time{font-size:10px;color:var(--muted);margin-top:2px}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+
 /* STATS GRID */
 .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:20px}
 .stat-box{background:var(--surface2);border-radius:10px;padding:14px;text-align:center}
@@ -217,10 +237,23 @@ input,select,textarea,button{font-family:var(--font-body);font-size:14px}
 
     <!-- STANDINGS -->
     <div id="tab-standings" class="section active">
-      <div class="stats-grid" id="stats-grid"></div>
-      <div class="card">
-        <div class="card-title">Season standings</div>
-        <div id="standings-list"><div class="loading">Loading...</div></div>
+      <div class="standings-layout">
+        <div>
+          <div class="stats-grid" id="stats-grid"></div>
+          <div class="card">
+            <div class="card-title">Season standings</div>
+            <div id="standings-list"><div class="loading">Loading...</div></div>
+          </div>
+        </div>
+        <div class="ticker-card">
+          <div class="ticker-header">
+            <div class="ticker-live"></div>
+            <div class="ticker-title">Points feed</div>
+          </div>
+          <div class="ticker-feed" id="ticker-feed">
+            <div class="empty" style="padding:2rem;font-size:13px">No points yet</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -520,6 +553,34 @@ function renderAll(league) {
   renderChat(league);
   renderAwardSelect(league);
   renderLog(league);
+  renderTicker(league);
+}
+
+function renderTicker(league) {
+  const feed = document.getElementById('ticker-feed');
+  if (!feed) return;
+  const entries = Object.values(league.log || {}).sort((a, b) => b.ts - a.ts).slice(0, 30);
+  if (!entries.length) {
+    feed.innerHTML = '<div class="empty" style="padding:2rem;font-size:13px">No points yet</div>';
+    return;
+  }
+  feed.innerHTML = entries.map(e => {
+    const age = Date.now() - e.ts;
+    const timeStr = age < 60000 ? 'just now'
+      : age < 3600000 ? Math.floor(age / 60000) + 'm ago'
+      : age < 86400000 ? Math.floor(age / 3600000) + 'h ago'
+      : new Date(e.ts).toLocaleDateString();
+    const sign = e.pts >= 0 ? '+' : '';
+    const cls = e.pts >= 0 ? 'pos' : 'neg';
+    return '<div class="ticker-item">' +
+      '<div class="ticker-row">' +
+        '<span class="ticker-who">' + e.to + '</span>' +
+        '<span class="ticker-pts ' + cls + '">' + sign + e.pts + ' pts</span>' +
+      '</div>' +
+      '<div class="ticker-desc">' + (e.desc || '') + '</div>' +
+      '<div class="ticker-time">' + timeStr + '</div>' +
+    '</div>';
+  }).join('');
 }
 
 function renderStandings(league) {
