@@ -410,8 +410,16 @@ const firebaseConfig = {
 };
 // ─────────────────────────────────────────────────────────────────────────────
 
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
+let db;
+try {
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.database();
+} catch(e) {
+  document.addEventListener('DOMContentLoaded', () => {
+    const el = document.getElementById('login-error');
+    if (el) { el.textContent = 'Firebase failed to initialize: ' + e.message; el.style.display = 'block'; }
+  });
+}
 
 const COLORS = ['#7c6ef5','#f5a623','#3dd68c','#f5534f','#4fa8f5','#e879f9','#fb923c','#34d399'];
 const SPORT_COLORS = { nfl:'#4fa8f5', nba:'#f5a623', mlb:'#3dd68c', nhl:'#7c6ef5', mls:'#3dd68c', pga:'#fb923c', tennis:'#f5534f', other:'#aaa' };
@@ -454,21 +462,31 @@ async function handleLogin() {
   const name = document.getElementById('login-name').value.trim();
   const code = document.getElementById('login-code').value.trim().toUpperCase();
   const errEl = document.getElementById('login-error');
+  const btn = document.querySelector('.btn-login');
   errEl.style.display = 'none';
   if (!name) { errEl.textContent = 'Please enter your name'; errEl.style.display = 'block'; return; }
   myName = name;
-  if (code) {
-    leagueCode = code;
-    const snap = await db.ref('leagues/' + code).once('value');
-    if (!snap.exists()) { errEl.textContent = 'League not found. Check your code.'; errEl.style.display = 'block'; return; }
-    const league = snap.val();
-    if (!league.members || !league.members[myName]) {
-      const idx = Object.keys(league.members || {}).length;
-      await db.ref('leagues/' + code + '/members/' + myName).set({ name: myName, score: 0, color: COLORS[idx % COLORS.length], roster: {} });
+  btn.disabled = true; btn.textContent = 'Connecting…';
+  try {
+    if (code) {
+      leagueCode = code;
+      const snap = await db.ref('leagues/' + code).once('value');
+      if (!snap.exists()) { errEl.textContent = 'League not found. Check your code.'; errEl.style.display = 'block'; return; }
+      const league = snap.val();
+      if (!league.members || !league.members[myName]) {
+        const idx = Object.keys(league.members || {}).length;
+        await db.ref('leagues/' + code + '/members/' + myName).set({ name: myName, score: 0, color: COLORS[idx % COLORS.length], roster: {} });
+      }
+    } else {
+      leagueCode = randCode();
+      await db.ref('leagues/' + leagueCode).set(defaultLeague(myName, leagueCode));
     }
-  } else {
-    leagueCode = randCode();
-    await db.ref('leagues/' + leagueCode).set(defaultLeague(myName, leagueCode));
+  } catch(e) {
+    errEl.textContent = 'Error: ' + (e.message || 'Could not connect to database.');
+    errEl.style.display = 'block';
+    return;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Enter league →';
   }
   localStorage.setItem('rl_name', myName);
   localStorage.setItem('rl_code', leagueCode);
