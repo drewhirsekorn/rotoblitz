@@ -551,7 +551,7 @@ function renderPool(league) {
   if (!pool.length) { poolEl.innerHTML = ''; emptyEl.style.display = 'block'; return; }
   emptyEl.style.display = 'none';
   poolEl.innerHTML = pool.map(p =>
-    '<span class="player-chip" onclick="draftPlayer('' + encodeURIComponent(p.name) + '')">' +
+    '<span class="player-chip" onclick="draftPlayer(\'' + encodeURIComponent(p.name) + '\')">' +
       '<span class="sport-dot" style="background:' + (SPORT_COLORS[p.sport]||'#aaa') + '"></span>' +
       '<span>' + p.name + '</span>' +
       '<span class="chip-pos">' + p.pos + '</span>' +
@@ -572,7 +572,7 @@ function renderRoster(league) {
       '<span class="sport-dot" style="background:' + (SPORT_COLORS[p.sport]||'#aaa') + '"></span>' +
       '<div class="flex1"><div class="roster-name">' + p.name + '</div>' +
       '<div style="font-size:12px;color:var(--muted)">' + p.sport.toUpperCase() + ' · ' + p.pos + '</div></div>' +
-      '<button class="drop-btn" onclick="dropPlayer('' + encodeURIComponent(p.name) + '')" title="Drop">&#10005;</button>' +
+      '<button class="drop-btn" onclick="dropPlayer(\'' + encodeURIComponent(p.name) + '\')" title="Drop">&#10005;</button>' +
     '</div>').join('');
 }
 
