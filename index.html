@@ -712,15 +712,31 @@ async function searchPlayers(query) {
   }, 300);
 }
 
+function extractNumericId(player) {
+  // uid format: "s:40~l:46~a:3139477" — the numeric part after "a:" matches box score athlete IDs
+  if (player.uid) {
+    const m = player.uid.match(/a:(\d+)/);
+    if (m) return m[1];
+  }
+  // fallback: parse from web URL like ".../id/3139477/..."
+  const url = player.link && player.link.web;
+  if (url) {
+    const m = url.match(/\/id\/(\d+)/);
+    if (m) return m[1];
+  }
+  return player.id;
+}
+
 async function addPlayerToPool(id) {
   const player = _searchResults[id];
   if (!player) return;
   document.getElementById('search-results').style.display = 'none';
   document.getElementById('player-search').value = '';
   const sport = (player.defaultLeagueSlug || 'other').toLowerCase();
+  const athleteId = extractNumericId(player);
   setSyncing(true);
-  await db.ref('leagues/' + leagueCode + '/pool/' + player.id).set({
-    id: player.id,
+  await db.ref('leagues/' + leagueCode + '/pool/' + athleteId).set({
+    id: athleteId,
     name: player.displayName,
     sport: sport,
     pos: '—',
