@@ -470,20 +470,7 @@ function defaultLeague(name, code) {
   return {
     name: 'My Fantasy League', code, week: 1,
     members: { [name]: { name, score: 0, color: COLORS[0], roster: {} } },
-    pool: {
-      'Patrick Mahomes':  { name:'Patrick Mahomes',  sport:'nfl', pos:'QB' },
-      'Tyreek Hill':      { name:'Tyreek Hill',      sport:'nfl', pos:'WR' },
-      "Ja'Marr Chase":    { name:"Ja'Marr Chase",   sport:'nfl', pos:'WR' },
-      'Josh Allen':       { name:'Josh Allen',       sport:'nfl', pos:'QB' },
-      'LeBron James':     { name:'LeBron James',     sport:'nba', pos:'SF' },
-      'Stephen Curry':    { name:'Stephen Curry',    sport:'nba', pos:'PG' },
-      'Nikola Jokic':     { name:'Nikola Jokic',     sport:'nba', pos:'C'  },
-      'Luka Doncic':      { name:'Luka Doncic',      sport:'nba', pos:'PG' },
-      'Shohei Ohtani':    { name:'Shohei Ohtani',    sport:'mlb', pos:'DH' },
-      'Mookie Betts':     { name:'Mookie Betts',     sport:'mlb', pos:'OF' },
-      'Connor McDavid':   { name:'Connor McDavid',   sport:'nhl', pos:'C'  },
-      'Nathan MacKinnon': { name:'Nathan MacKinnon', sport:'nhl', pos:'C'  },
-    },
+    pool: {},
     chat: {}, log: {}
   };
 }
