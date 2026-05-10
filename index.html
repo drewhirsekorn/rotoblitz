@@ -1089,8 +1089,10 @@ function showPlayerCard(e, id, sport) {
 
   content.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:8px 0">Loading…</div>';
   const cfg = SPORT_API[sport];
-  fetch('https://site.api.espn.com/apis/site/v2/sports/' + cfg.sport + '/' + cfg.league + '/athletes/' + id + '/gamelog')
-    .then(r => r.json())
+  const season = new Date().getFullYear();
+  const url = 'https://site.web.api.espn.com/apis/site/v2/sports/' + cfg.sport + '/' + cfg.league + '/athletes/' + id + '/gamelog?season=' + season;
+  fetch(url)
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(data => {
       console.log('[gamelog]', sport, id, data);
       _cardCache[id] = parseGamelog(data, sport);
@@ -1098,7 +1100,10 @@ function showPlayerCard(e, id, sport) {
         renderCardContent(content, _cardCache[id], sport);
       }
     })
-    .catch(() => { content.innerHTML = '<div style="color:var(--muted);font-size:13px">Stats unavailable</div>'; });
+    .catch(err => {
+      console.error('[gamelog] failed', url, err);
+      content.innerHTML = '<div style="color:var(--muted);font-size:13px">Stats unavailable</div>';
+    });
 }
 
 function hidePlayerCard() {
