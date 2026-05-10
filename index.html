@@ -393,6 +393,12 @@ input,select,textarea,button{font-family:var(--font-body);font-size:14px}
 <div class="toast" id="toast"></div>
 
 <!-- FIREBASE -->
+<script>
+window.onerror = function(msg, src, line) {
+  const el = document.getElementById('login-error');
+  if (el) { el.textContent = 'JS error: ' + msg + ' (line ' + line + ')'; el.style.display = 'block'; }
+};
+</script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script>
