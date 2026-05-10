@@ -406,6 +406,11 @@ input,select,textarea,button{font-family:var(--font-body);font-size:14px}
         <button class="btn btn-ghost btn-block" onclick="renameLeague()">Update name</button>
       </div>
       <div class="card">
+        <div class="card-title">Reset sync cache</div>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:10px">If games were synced but no points were awarded (e.g. after a bug fix), clear the cache so they get re-processed on the next sync.</p>
+        <button class="btn btn-ghost btn-block" onclick="resetSyncCache()">Clear sync cache &amp; re-sync from 14 days ago</button>
+      </div>
+      <div class="card">
         <div class="card-title">Points log</div>
         <div id="points-log"><div class="empty" style="padding:1rem">No points awarded yet</div></div>
       </div>
@@ -780,6 +785,15 @@ async function awardPoints() {
   toast('Awarded ' + pts + ' pts to ' + to);
 }
 
+async function resetSyncCache() {
+  if (!confirm('Clear sync cache? This will re-process the last 14 days of games on next sync.')) return;
+  setSyncing(true);
+  await db.ref('leagues/' + leagueCode + '/synced').remove();
+  await db.ref('leagues/' + leagueCode + '/lastSyncDate').remove();
+  setSyncing(false);
+  toast('Sync cache cleared — click Sync Scores to re-process games.');
+}
+
 async function renameLeague() {
   const name = document.getElementById('rename-input').value.trim();
   if (!name) return;
@@ -819,70 +833,86 @@ const SPORT_API = {
   mls: { sport: 'soccer',    league: 'usa.1' },
 };
 
-function calcNBA(stats) {
-  // ESPN NBA keys: [MIN,PTS,FG,3PT,FT,REB,AST,TO,STL,BLK,OREB,DREB,PF,+/-]
-  const pts = parseFloat(stats[1]) || 0;
-  const reb = parseFloat(stats[5]) || 0;
-  const ast = parseFloat(stats[6]) || 0;
-  const to  = parseFloat(stats[7]) || 0;
-  const stl = parseFloat(stats[8]) || 0;
-  const blk = parseFloat(stats[9]) || 0;
-  let fp = pts * 1 + reb * 1.2 + ast * 1.5 + stl * 2 + blk * 2 - to;
+function getStat(stats, names, ...candidates) {
+  for (const name of candidates) {
+    const idx = names.findIndex(n => n.toUpperCase() === name.toUpperCase());
+    if (idx !== -1) return parseFloat(stats[idx]) || 0;
+  }
+  return 0;
+}
+
+function calcNBA(stats, names) {
+  const g = (...a) => getStat(stats, names, ...a);
+  const pts = g('PTS');
+  const reb = g('REB');
+  const ast = g('AST');
+  const to  = g('TO');
+  const stl = g('STL');
+  const blk = g('BLK');
+  let fp = pts + reb * 1.2 + ast * 1.5 + stl * 2 + blk * 2 - to;
   if ([pts, reb, ast].filter(x => x >= 10).length >= 3) fp += 5;
   return Math.round(fp * 10) / 10;
 }
 
-function calcMLBBatting(stats) {
-  // ESPN MLB batting keys: [hits-atBats,atBats,runs,hits,RBIs,homeRuns,walks,strikeouts,pitches,avg,onBasePct,slugAvg]
-  const hits  = parseFloat(stats[3]) || 0;
-  const hr    = parseFloat(stats[5]) || 0;
-  const rbi   = parseFloat(stats[4]) || 0;
-  const runs  = parseFloat(stats[2]) || 0;
-  const walks = parseFloat(stats[6]) || 0;
-  // Can't distinguish 1B/2B/3B from box score; non-HR hits scored as singles
-  const fp = (hits - hr) * 1 + hr * 4 + rbi * 1 + runs * 1 + walks * 0.5;
+function calcMLBBatting(stats, names) {
+  const g = (...a) => getStat(stats, names, ...a);
+  const hits  = g('H');
+  const hr    = g('HR');
+  const rbi   = g('RBI');
+  const runs  = g('R');
+  const walks = g('BB');
+  const fp = (hits - hr) + hr * 4 + rbi + runs + walks * 0.5;
   return Math.round(fp * 10) / 10;
 }
 
-function calcMLBPitching(stats) {
-  // ESPN MLB pitching keys: [innings,ERA,WHIP,wins,losses,saves,strikeouts,walks,hits,runs,earnedRuns]
-  const wins = parseFloat(stats[3]) || 0;
-  const k    = parseFloat(stats[6]) || 0;
-  const er   = parseFloat(stats[10]) || 0;
-  const fp = wins * 5 + k * 1 - er * 1;
-  return Math.round(fp * 10) / 10;
+function calcMLBPitching(stats, names) {
+  const g = (...a) => getStat(stats, names, ...a);
+  const wins = g('W');
+  const k    = g('K', 'SO');
+  const er   = g('ER');
+  return Math.round((wins * 5 + k - er) * 10) / 10;
 }
 
-function calcNHL(stats, keys) {
-  const i = k => keys.indexOf(k);
-  const g   = parseFloat(stats[i('G')]  ?? stats[i('goals')])  || 0;
-  const a   = parseFloat(stats[i('A')]  ?? stats[i('assists')]) || 0;
-  const sog = parseFloat(stats[i('SOG')] ?? stats[i('S')])     || 0;
-  const bs  = parseFloat(stats[i('BS')] ?? stats[i('BKS')])    || 0;
-  let fp = g * 3 + a * 2 + sog * 0.5 + bs * 0.5;
-  if (g >= 3) fp += 3;
+function calcNHL(stats, names) {
+  const g = (...a) => getStat(stats, names, ...a);
+  const goals = g('G', 'goals');
+  const ast   = g('A', 'assists');
+  const sog   = g('SOG', 'S', 'shots');
+  const bs    = g('BS', 'BKS', 'blocked');
+  let fp = goals * 3 + ast * 2 + sog * 0.5 + bs * 0.5;
+  if (goals >= 3) fp += 3;
   return Math.round(fp * 10) / 10;
 }
 
 function parseBoxScore(summary, sport, rostered) {
   const awards = {};
-  for (const teamData of (summary.boxscore?.players || [])) {
+  const players = summary.boxscore?.players || summary.boxscore?.teams || [];
+  let logged = false;
+  for (const teamData of players) {
     for (const statGroup of (teamData.statistics || [])) {
-      const keys = statGroup.keys || [];
+      const names = statGroup.names || statGroup.keys || [];
+      if (!logged) { console.log('[parseBoxScore]', sport, 'stat names:', names); logged = true; }
       for (const ath of (statGroup.athletes || [])) {
         const id = ath.athlete?.id;
-        if (!id || !rostered[id]) continue;
+        if (!id) continue;
+        if (!rostered[id]) {
+          // log first few misses to spot ID format issues
+          if (Object.keys(awards).length === 0) console.log('[parseBoxScore] miss id:', id, ath.athlete?.displayName);
+          continue;
+        }
         const { memberName } = rostered[id];
         const stats = ath.stats || [];
+        console.log('[parseBoxScore] HIT', ath.athlete?.displayName, 'id:', id, 'names:', names, 'stats:', stats);
         let fp = 0;
         if (sport === 'nba') {
-          fp = calcNBA(stats);
+          fp = calcNBA(stats, names);
         } else if (sport === 'mlb') {
-          fp = keys[0] === 'innings' ? calcMLBPitching(stats) : calcMLBBatting(stats);
+          const isPitching = names[0]?.toUpperCase() === 'IP' || names[0]?.toLowerCase().includes('inn');
+          fp = isPitching ? calcMLBPitching(stats, names) : calcMLBBatting(stats, names);
         } else if (sport === 'nhl') {
-          fp = calcNHL(stats, keys);
+          fp = calcNHL(stats, names);
         }
-        if (fp) awards[memberName] = (awards[memberName] || 0) + fp;
+        if (fp !== 0) awards[memberName] = (awards[memberName] || 0) + fp;
       }
     }
   }
