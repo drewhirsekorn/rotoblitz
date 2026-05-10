@@ -912,13 +912,20 @@ async function syncScores() {
     const league = snap.val();
 
     const rostered = {};
+    let noIdCount = 0;
     for (const [memberName, member] of Object.entries(league.members || {})) {
       for (const player of Object.values(member.roster || {})) {
         if (player.id) rostered[player.id] = { player, memberName };
+        else noIdCount++;
       }
     }
-    if (!Object.keys(rostered).length) {
-      status.textContent = 'No rostered players with ESPN IDs yet.';
+    const rosteredCount = Object.keys(rostered).length;
+    console.log('[sync] rostered with IDs:', rosteredCount, 'without IDs:', noIdCount, rostered);
+
+    if (!rosteredCount) {
+      status.textContent = noIdCount
+        ? 'Roster has ' + noIdCount + ' player(s) without ESPN IDs — drop and re-add them via search.'
+        : 'No rostered players yet.';
       btn.disabled = false;
       return;
     }
@@ -926,40 +933,51 @@ async function syncScores() {
     const syncedSnap = await db.ref('leagues/' + leagueCode + '/synced').once('value');
     const synced = syncedSnap.val() || {};
 
-    // Determine start date: day after last sync, or 14 days ago if never synced
+    // Start from lastSyncDate (inclusive) so re-syncing the same day picks up late-finishing games.
+    // Game-level dedup via synced/{id} prevents double-counting.
     const lastSyncSnap = await db.ref('leagues/' + leagueCode + '/lastSyncDate').once('value');
     const lastSync = lastSyncSnap.val();
-    const startDate = lastSync
-      ? new Date(new Date(lastSync).getTime() + 86400000).toISOString().slice(0, 10)
-      : new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
+    const startDate = lastSync || new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
     const today = new Date().toISOString().slice(0, 10);
     const dates = dateRange(startDate, today);
 
-    const activeSports = [...new Set(Object.values(rostered).map(r => r.player.sport).filter(s => SPORT_API[s]))];
-    let gamesProcessed = 0;
+    const allSports = [...new Set(Object.values(rostered).map(r => r.player.sport))];
+    const activeSports = allSports.filter(s => SPORT_API[s]);
+    console.log('[sync] sports in roster:', allSports, '→ active:', activeSports, '| dates:', dates.length);
+
+    if (!activeSports.length) {
+      status.textContent = 'Players found (' + rosteredCount + ') but sports not recognized: ' + allSports.join(', ') + '. Expected: nba, nfl, mlb, nhl, mls.';
+      btn.disabled = false;
+      return;
+    }
+
+    let gamesFound = 0, gamesProcessed = 0;
     const memberDeltas = {};
     const logs = [];
 
     for (const dateStr of dates) {
-      status.textContent = 'Syncing ' + dateStr.slice(0,4) + '-' + dateStr.slice(4,6) + '-' + dateStr.slice(6) + '…';
+      status.textContent = 'Checking ' + dateStr.slice(0,4) + '-' + dateStr.slice(4,6) + '-' + dateStr.slice(6) + '…';
       for (const sportKey of activeSports) {
         const cfg = SPORT_API[sportKey];
         let scoreboardData;
         try {
           const res = await fetch('https://site.api.espn.com/apis/site/v2/sports/' + cfg.sport + '/' + cfg.league + '/scoreboard?dates=' + dateStr);
           scoreboardData = await res.json();
-        } catch(e) { continue; }
+        } catch(e) { console.warn('[sync] scoreboard fetch failed', sportKey, dateStr, e); continue; }
 
         for (const event of (scoreboardData.events || [])) {
-          if (!event.status?.type?.completed) continue;
+          const completed = event.status?.type?.completed || event.status?.type?.state === 'post';
+          if (!completed) continue;
+          gamesFound++;
           if (synced[event.id]) continue;
           let summary;
           try {
             const res2 = await fetch('https://site.api.espn.com/apis/site/v2/sports/' + cfg.sport + '/' + cfg.league + '/summary?event=' + event.id);
             summary = await res2.json();
-          } catch(e) { continue; }
+          } catch(e) { console.warn('[sync] summary fetch failed', event.id, e); continue; }
 
           const gameAwards = parseBoxScore(summary, sportKey, rostered);
+          console.log('[sync] game', event.id, sportKey, 'awards:', gameAwards);
           const label = event.shortName || event.name || event.id;
           for (const [memberName, pts] of Object.entries(gameAwards)) {
             if (!pts) continue;
@@ -985,13 +1003,16 @@ async function syncScores() {
     writes.push(db.ref('leagues/' + leagueCode + '/lastSyncDate').set(today));
     await Promise.all(writes);
 
+    const names = Object.keys(memberDeltas);
     if (gamesProcessed === 0) {
-      status.textContent = 'All caught up — no new games since ' + (lastSync || startDate) + '.';
+      status.textContent = 'Checked ' + dates.length + ' day(s), ' + gamesFound + ' completed game(s) found — all already synced.' +
+        (noIdCount ? ' Note: ' + noIdCount + ' rostered player(s) have no ESPN ID (drop & re-add).' : '');
     } else {
-      const names = Object.keys(memberDeltas);
-      status.textContent = gamesProcessed + ' game(s) synced across ' + dates.length + ' day(s).' + (names.length ? ' Updated: ' + names.join(', ') + '.' : '');
+      status.textContent = gamesProcessed + ' new game(s) synced.' + (names.length ? ' Points added: ' + names.join(', ') + '.' : ' No roster matches in these games.');
     }
+    console.log('[sync] done. processed:', gamesProcessed, 'deltas:', memberDeltas);
   } catch(e) {
+    console.error('[sync] error', e);
     status.textContent = 'Sync error: ' + e.message;
   }
   btn.disabled = false;
