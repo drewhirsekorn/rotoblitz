@@ -447,9 +447,14 @@ input,select,textarea,button{font-family:var(--font-body);font-size:14px}
         <button class="btn btn-ghost btn-block" onclick="renameLeague()">Update name</button>
       </div>
       <div class="card">
+        <div class="card-title">Reset all scores</div>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:10px">Sets every member score to 0 and clears the points log. Use this to start fresh.</p>
+        <button class="btn btn-ghost btn-block" onclick="resetAllScores()">Reset all scores to 0</button>
+      </div>
+      <div class="card">
         <div class="card-title">Reset sync cache</div>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:10px">If games were synced but no points were awarded (e.g. after a bug fix), clear the cache so they get re-processed on the next sync.</p>
-        <button class="btn btn-ghost btn-block" onclick="resetSyncCache()">Clear sync cache &amp; re-sync current week</button>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:10px">Clears the challenge game sync cache so games get re-tallied on next sync.</p>
+        <button class="btn btn-ghost btn-block" onclick="resetSyncCache()">Clear sync cache</button>
       </div>
       <div class="card">
         <div class="card-title">Points log</div>
@@ -1014,6 +1019,20 @@ async function saveWeekDates() {
   toast('Week dates saved');
 }
 
+async function resetAllScores() {
+  if (!confirm('Reset ALL member scores to 0 and clear the points log? This cannot be undone.')) return;
+  setSyncing(true);
+  const snap = await db.ref('leagues/' + leagueCode + '/members').once('value');
+  const members = snap.val() || {};
+  const writes = Object.keys(members).map(name =>
+    db.ref('leagues/' + leagueCode + '/members/' + name + '/score').set(0)
+  );
+  writes.push(db.ref('leagues/' + leagueCode + '/log').remove());
+  await Promise.all(writes);
+  setSyncing(false);
+  toast('All scores reset to 0');
+}
+
 async function resetSyncCache() {
   if (!confirm('Clear sync cache? This will re-process the current week on next sync.')) return;
   setSyncing(true);
@@ -1172,117 +1191,12 @@ async function syncScores() {
   const status = document.getElementById('sync-status');
   btn.disabled = true;
   status.style.display = 'block';
-  status.textContent = 'Syncing…';
-
+  status.textContent = 'Syncing challenge stats…';
   try {
     const snap = await db.ref('leagues/' + leagueCode).once('value');
     const league = snap.val();
-
     await syncChallengeStats(league, status);
-
-    const rostered = {};
-    let noIdCount = 0;
-    for (const [memberName, member] of Object.entries(league.members || {})) {
-      for (const player of Object.values(member.roster || {})) {
-        if (player.id) rostered[player.id] = { player, memberName };
-        else noIdCount++;
-      }
-    }
-    const rosteredCount = Object.keys(rostered).length;
-    console.log('[sync] rostered with IDs:', rosteredCount, 'without IDs:', noIdCount, rostered);
-
-    if (!rosteredCount) {
-      status.textContent = noIdCount
-        ? 'Roster has ' + noIdCount + ' player(s) without ESPN IDs — drop and re-add them via search.'
-        : 'No rostered players yet.';
-      btn.disabled = false;
-      return;
-    }
-
-    const syncedSnap = await db.ref('leagues/' + leagueCode + '/synced').once('value');
-    const synced = syncedSnap.val() || {};
-
-    const today = new Date().toISOString().slice(0, 10);
-    const weekStart = league.weekStart;
-    const weekEnd = league.weekEnd;
-    if (!weekStart || !weekEnd) {
-      status.textContent = 'Set week start and end dates in Admin before syncing.';
-      btn.disabled = false;
-      return;
-    }
-    const endDate = weekEnd < today ? weekEnd : today;
-    const dates = dateRange(weekStart, endDate);
-
-    const allSports = [...new Set(Object.values(rostered).map(r => r.player.sport))];
-    const activeSports = allSports.filter(s => SPORT_API[s]);
-    console.log('[sync] sports in roster:', allSports, '→ active:', activeSports, '| dates:', dates.length);
-
-    if (!activeSports.length) {
-      status.textContent = 'Players found (' + rosteredCount + ') but sports not recognized: ' + allSports.join(', ') + '. Expected: nba, nfl, mlb, nhl, mls.';
-      btn.disabled = false;
-      return;
-    }
-
-    let gamesFound = 0, gamesProcessed = 0;
-    const memberDeltas = {};
-    const logs = [];
-
-    for (const dateStr of dates) {
-      status.textContent = 'Checking ' + dateStr.slice(0,4) + '-' + dateStr.slice(4,6) + '-' + dateStr.slice(6) + '…';
-      for (const sportKey of activeSports) {
-        const cfg = SPORT_API[sportKey];
-        let scoreboardData;
-        try {
-          const res = await fetch('https://site.api.espn.com/apis/site/v2/sports/' + cfg.sport + '/' + cfg.league + '/scoreboard?dates=' + dateStr);
-          scoreboardData = await res.json();
-        } catch(e) { console.warn('[sync] scoreboard fetch failed', sportKey, dateStr, e); continue; }
-
-        for (const event of (scoreboardData.events || [])) {
-          const completed = event.status?.type?.completed || event.status?.type?.state === 'post';
-          if (!completed) continue;
-          gamesFound++;
-          if (synced[event.id]) continue;
-          let summary;
-          try {
-            const res2 = await fetch('https://site.api.espn.com/apis/site/v2/sports/' + cfg.sport + '/' + cfg.league + '/summary?event=' + event.id);
-            summary = await res2.json();
-          } catch(e) { console.warn('[sync] summary fetch failed', event.id, e); continue; }
-
-          const gameAwards = parseBoxScore(summary, sportKey, rostered);
-          console.log('[sync] game', event.id, sportKey, 'awards:', gameAwards);
-          const label = event.shortName || event.name || event.id;
-          for (const [memberName, pts] of Object.entries(gameAwards)) {
-            if (!pts) continue;
-            memberDeltas[memberName] = (memberDeltas[memberName] || 0) + pts;
-            logs.push({ to: memberName, pts, desc: sportKey.toUpperCase() + ': ' + label, ts: Date.now() });
-          }
-          synced[event.id] = true;
-          await db.ref('leagues/' + leagueCode + '/synced/' + event.id).set(true);
-          gamesProcessed++;
-        }
-      }
-    }
-
-    const writes = [];
-    for (const [memberName, delta] of Object.entries(memberDeltas)) {
-      const mSnap = await db.ref('leagues/' + leagueCode + '/members/' + memberName + '/score').once('value');
-      const current = mSnap.val() || 0;
-      writes.push(db.ref('leagues/' + leagueCode + '/members/' + memberName + '/score').set(Math.round((current + delta) * 10) / 10));
-    }
-    for (const log of logs) {
-      writes.push(db.ref('leagues/' + leagueCode + '/log').push(log));
-    }
-    writes.push(db.ref('leagues/' + leagueCode + '/lastSyncDate').set(today));
-    await Promise.all(writes);
-
-    const names = Object.keys(memberDeltas);
-    if (gamesProcessed === 0) {
-      status.textContent = 'Checked ' + dates.length + ' day(s), ' + gamesFound + ' completed game(s) found — all already synced.' +
-        (noIdCount ? ' Note: ' + noIdCount + ' rostered player(s) have no ESPN ID (drop & re-add).' : '');
-    } else {
-      status.textContent = gamesProcessed + ' new game(s) synced.' + (names.length ? ' Points added: ' + names.join(', ') + '.' : ' No roster matches in these games.');
-    }
-    console.log('[sync] done. processed:', gamesProcessed, 'deltas:', memberDeltas);
+    status.textContent = 'Challenge stats up to date.';
   } catch(e) {
     console.error('[sync] error', e);
     status.textContent = 'Sync error: ' + e.message;
