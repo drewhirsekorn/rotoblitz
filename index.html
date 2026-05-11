@@ -191,9 +191,9 @@ input,select,textarea,button{font-family:var(--font-body);font-size:14px}
 .pcg{display:flex;align-items:baseline;gap:6px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px}
 .pcg:last-child{border-bottom:none}
 .pcg-date{color:var(--muted);width:46px;flex-shrink:0;font-size:11px}
-.pcg-opp{color:var(--muted);width:56px;flex-shrink:0;font-size:11px}
-.pcg-stats{flex:1;color:var(--text)}
-.pcg-fp{font-family:var(--font-head);font-weight:700;width:48px;text-align:right;flex-shrink:0;font-size:13px}
+.pcg-opp{color:var(--muted);flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pcg-stats{color:var(--text);width:62px;text-align:right;flex-shrink:0;font-size:12px}
+.pcg-fp{font-family:var(--font-head);font-weight:700;width:44px;text-align:right;flex-shrink:0;font-size:13px}
 
 /* TEAM MODAL */
 #team-modal{display:none;position:fixed;inset:0;z-index:900;background:rgba(0,0,0,.75);align-items:center;justify-content:center}
@@ -1073,35 +1073,55 @@ if (savedName && savedCode) { myName = savedName; leagueCode = savedCode; startA
 const _cardCache = {};
 let _cardHideTimer = null;
 
+const CORE_LEAGUE = { nba:'basketball/leagues/nba', mlb:'baseball/leagues/mlb', nhl:'hockey/leagues/nhl', nfl:'football/leagues/nfl', mls:'soccer/leagues/mls' };
+
+async function fetchPlayerGamelog(id, sport) {
+  const league = CORE_LEAGUE[sport];
+  if (!league) throw new Error('unsupported sport');
+  const season = new Date().getFullYear();
+  const base = 'https://sports.core.api.espn.com/v2/sports/' + league;
+
+  const el = await fetch(base + '/athletes/' + id + '/eventlog?season=' + season + '&limit=100')
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+
+  const items = (el.events?.items || []).filter(i => i.played).slice(-5);
+  if (!items.length) return [];
+
+  return (await Promise.all(items.map(async item => {
+    const eventId = item.event?.['$ref']?.match(/events\/(\d+)/)?.[1];
+    if (!eventId) return null;
+    const statsUrl = (item.statistics?.['$ref'] || '').replace('http://', 'https://');
+    const [statsData, eventData] = await Promise.all([
+      statsUrl ? fetch(statsUrl).then(r => r.ok ? r.json() : null).catch(() => null) : null,
+      fetch(base + '/events/' + eventId).then(r => r.ok ? r.json() : null).catch(() => null)
+    ]);
+    const stats = {};
+    for (const cat of (statsData?.splits?.categories || []))
+      for (const s of (cat.stats || []))
+        if (s.abbreviation && stats[s.abbreviation] === undefined) stats[s.abbreviation] = s.value ?? 0;
+    return { stats, date: eventData?.date, shortName: eventData?.shortName };
+  }))).filter(Boolean).reverse();
+}
+
 function showPlayerCard(e, id, sport) {
   clearTimeout(_cardHideTimer);
   if (!id || !SPORT_API[sport]) return;
   const card = document.getElementById('player-hover-card');
   const content = document.getElementById('player-card-content');
-
-  const x = e.clientX + 18;
-  const y = e.clientY + 10;
-  card.style.left = (x + 320 > window.innerWidth ? e.clientX - 328 : x) + 'px';
-  card.style.top  = Math.min(y, window.innerHeight - 260) + 'px';
+  const x = e.clientX + 18, y = e.clientY + 10;
+  card.style.left = (x + 330 > window.innerWidth ? e.clientX - 338 : x) + 'px';
+  card.style.top  = Math.min(y, window.innerHeight - 270) + 'px';
   card.style.display = 'block';
-
   if (_cardCache[id]) { renderCardContent(content, _cardCache[id], sport); return; }
-
   content.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:8px 0">Loading…</div>';
-  const cfg = SPORT_API[sport];
-  const season = new Date().getFullYear();
-  const url = 'https://site.web.api.espn.com/apis/site/v2/sports/' + cfg.sport + '/' + cfg.league + '/athletes/' + id + '/gamelog?season=' + season;
-  fetch(url)
-    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-    .then(data => {
-      console.log('[gamelog]', sport, id, data);
-      _cardCache[id] = parseGamelog(data, sport);
-      if (document.getElementById('player-hover-card').style.display !== 'none') {
-        renderCardContent(content, _cardCache[id], sport);
-      }
+  fetchPlayerGamelog(id, sport)
+    .then(games => {
+      _cardCache[id] = games;
+      if (document.getElementById('player-hover-card').style.display !== 'none')
+        renderCardContent(content, games, sport);
     })
     .catch(err => {
-      console.error('[gamelog] failed', url, err);
+      console.error('[gamelog]', id, sport, err);
       content.innerHTML = '<div style="color:var(--muted);font-size:13px">Stats unavailable</div>';
     });
 }
@@ -1110,56 +1130,53 @@ function hidePlayerCard() {
   _cardHideTimer = setTimeout(() => { document.getElementById('player-hover-card').style.display = 'none'; }, 200);
 }
 
-function parseGamelog(data, sport) {
-  const events = [];
-  for (const st of (data.seasonTypes || [])) {
-    for (const cat of (st.categories || [])) {
-      if (!cat.events || !cat.names) continue;
-      for (const ev of cat.events) events.push({ ...ev, _names: cat.names });
-    }
-  }
-  if (!events.length) for (const ev of (data.events || [])) events.push(ev);
-  return events.slice(-5).reverse();
-}
-
 function renderCardContent(el, games, sport) {
   if (!games || !games.length) {
     el.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:8px 0">No recent games found</div>';
     return;
   }
   let total = 0;
-  const rows = games.map(ev => {
-    const names = ev._names || ev.names || [];
-    const stats = ev.stats || [];
+  const rows = games.map(g => {
+    const s = g.stats;
     let fp = 0, statStr = '';
     if (sport === 'nba') {
-      fp = calcNBA(stats, names);
-      statStr = getStat(stats,names,'PTS') + '/' + getStat(stats,names,'REB') + '/' + getStat(stats,names,'AST') + ' P/R/A';
+      const pts=s['PTS']||0, reb=s['REB']||0, ast=s['AST']||0, to=s['TO']||0, stl=s['STL']||0, blk=s['BLK']||0;
+      fp = pts + reb*1.2 + ast*1.5 + stl*2 + blk*2 - to;
+      if ([pts,reb,ast].filter(x=>x>=10).length>=3) fp += 5;
+      fp = Math.round(fp*10)/10;
+      statStr = pts + '/' + reb + '/' + ast;
     } else if (sport === 'mlb') {
-      const pit = (names[0]||'').toUpperCase() === 'IP' || (names[0]||'').toLowerCase().includes('inn');
-      if (pit) { fp = calcMLBPitching(stats, names); statStr = getStat(stats,names,'IP') + 'IP ' + getStat(stats,names,'K','SO') + 'K ' + getStat(stats,names,'ER') + 'ER'; }
-      else     { fp = calcMLBBatting(stats, names);  statStr = getStat(stats,names,'H') + 'H ' + getStat(stats,names,'HR') + 'HR ' + getStat(stats,names,'RBI') + 'RBI'; }
+      if (s['IP'] !== undefined) {
+        const w=s['W']||0, k=s['K']||s['SO']||0, er=s['ER']||0;
+        fp = Math.round((w*5+k-er)*10)/10;
+        statStr = (s['IP']||0)+'IP '+k+'K '+er+'ER';
+      } else {
+        const h=s['H']||0, hr=s['HR']||0, rbi=s['RBI']||0, r=s['R']||0, bb=s['BB']||0;
+        fp = Math.round(((h-hr)+hr*4+rbi+r+bb*0.5)*10)/10;
+        statStr = h+'H '+hr+'HR '+rbi+'RBI';
+      }
     } else if (sport === 'nhl') {
-      fp = calcNHL(stats, names);
-      statStr = getStat(stats,names,'G','goals') + 'G ' + getStat(stats,names,'A','assists') + 'A ' + getStat(stats,names,'SOG','S','shots') + 'SOG';
+      const goals=s['G']||0, a=s['A']||0, sog=s['SOG']||s['S']||0, bs=s['BS']||s['BKS']||0;
+      fp = Math.round((goals*3+a*2+sog*0.5+bs*0.5)*10)/10;
+      if (goals>=3) fp+=3;
+      statStr = goals+'G '+a+'A '+sog+'SOG';
     }
     total += fp;
-    const opp   = (ev.atVs === '@' ? '@ ' : 'vs ') + (ev.opponentAbbrev || '?');
-    const date  = (ev.gameDate || '').replace(/,?\s*\d{4}/, '').replace(/\s+/g,' ').trim();
-    const fpCol = fp > 0 ? 'var(--accent2)' : fp < 0 ? 'var(--red)' : 'var(--muted)';
+    const date = g.date ? new Date(g.date).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '?';
+    const game = g.shortName || '?';
+    const fpCol = fp>0 ? 'var(--accent2)' : fp<0 ? 'var(--red)' : 'var(--muted)';
     return '<div class="pcg">' +
       '<span class="pcg-date">' + date + '</span>' +
-      '<span class="pcg-opp">'  + opp  + '</span>' +
+      '<span class="pcg-opp">' + game + '</span>' +
       '<span class="pcg-stats">' + statStr + '</span>' +
-      '<span class="pcg-fp" style="color:' + fpCol + '">' + (fp > 0 ? '+' : '') + fp + '</span>' +
+      '<span class="pcg-fp" style="color:' + fpCol + '">' + (fp>0?'+':'') + fp + '</span>' +
     '</div>';
   }).join('');
-
-  const avg = Math.round(total / games.length * 10) / 10;
+  const avg = Math.round(total/games.length*10)/10;
   el.innerHTML =
-    '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:8px">Last ' + games.length + ' games · ' + sport.toUpperCase() + '</div>' +
+    '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:8px">Last '+games.length+' games · '+sport.toUpperCase()+'</div>' +
     '<div style="display:flex;font-size:10px;color:var(--muted);padding-bottom:4px;border-bottom:1px solid var(--border)">' +
-      '<span style="width:46px">Date</span><span style="width:56px">Opp</span><span style="flex:1">Stats</span><span style="width:48px;text-align:right">FP</span>' +
+      '<span style="width:46px">Date</span><span style="flex:1">Game</span><span style="width:62px;text-align:right">Stats</span><span style="width:44px;text-align:right">FP</span>' +
     '</div>' + rows +
     '<div style="display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--muted)">' +
       '<span>Avg / game</span>' +
