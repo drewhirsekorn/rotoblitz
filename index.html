@@ -414,6 +414,15 @@ input,select,textarea,button{font-family:var(--font-body);font-size:14px}
         <button class="btn btn-accent btn-block" onclick="awardPoints()">Award points</button>
       </div>
       <div class="card">
+        <div class="card-title">Current week</div>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:10px">Sync will only collect points for games completed within this date range.</p>
+        <div class="admin-grid">
+          <div class="field"><label>Week start</label><input type="date" id="week-start-input"></div>
+          <div class="field"><label>Week end</label><input type="date" id="week-end-input"></div>
+        </div>
+        <button class="btn btn-ghost btn-block" onclick="saveWeekDates()">Save week dates</button>
+      </div>
+      <div class="card">
         <div class="card-title">Rename league</div>
         <div class="field"><label>New name</label><input type="text" id="rename-input" placeholder="e.g. The Sunday Gridiron League"></div>
         <button class="btn btn-ghost btn-block" onclick="renameLeague()">Update name</button>
@@ -421,7 +430,7 @@ input,select,textarea,button{font-family:var(--font-body);font-size:14px}
       <div class="card">
         <div class="card-title">Reset sync cache</div>
         <p style="font-size:13px;color:var(--muted);margin-bottom:10px">If games were synced but no points were awarded (e.g. after a bug fix), clear the cache so they get re-processed on the next sync.</p>
-        <button class="btn btn-ghost btn-block" onclick="resetSyncCache()">Clear sync cache &amp; re-sync from 14 days ago</button>
+        <button class="btn btn-ghost btn-block" onclick="resetSyncCache()">Clear sync cache &amp; re-sync current week</button>
       </div>
       <div class="card">
         <div class="card-title">Points log</div>
@@ -552,6 +561,10 @@ function renderAll(league) {
   renderAwardSelect(league);
   renderLog(league);
   renderTicker(league);
+  const wsEl = document.getElementById('week-start-input');
+  const weEl = document.getElementById('week-end-input');
+  if (wsEl) wsEl.value = league.weekStart || '';
+  if (weEl) weEl.value = league.weekEnd || '';
 }
 
 function renderTicker(league) {
@@ -800,13 +813,27 @@ async function awardPoints() {
   toast('Awarded ' + pts + ' pts to ' + to);
 }
 
+async function saveWeekDates() {
+  const start = document.getElementById('week-start-input').value;
+  const end = document.getElementById('week-end-input').value;
+  if (!start || !end) { toast('Set both start and end dates'); return; }
+  if (start > end) { toast('Start must be before end'); return; }
+  setSyncing(true);
+  await Promise.all([
+    db.ref('leagues/' + leagueCode + '/weekStart').set(start),
+    db.ref('leagues/' + leagueCode + '/weekEnd').set(end)
+  ]);
+  setSyncing(false);
+  toast('Week dates saved');
+}
+
 async function resetSyncCache() {
-  if (!confirm('Clear sync cache? This will re-process the last 14 days of games on next sync.')) return;
+  if (!confirm('Clear sync cache? This will re-process the current week on next sync.')) return;
   setSyncing(true);
   await db.ref('leagues/' + leagueCode + '/synced').remove();
   await db.ref('leagues/' + leagueCode + '/lastSyncDate').remove();
   setSyncing(false);
-  toast('Sync cache cleared — click Sync Scores to re-process games.');
+  toast('Sync cache cleared — click Sync to re-process games.');
 }
 
 async function renameLeague() {
@@ -978,13 +1005,16 @@ async function syncScores() {
     const syncedSnap = await db.ref('leagues/' + leagueCode + '/synced').once('value');
     const synced = syncedSnap.val() || {};
 
-    // Start from lastSyncDate (inclusive) so re-syncing the same day picks up late-finishing games.
-    // Game-level dedup via synced/{id} prevents double-counting.
-    const lastSyncSnap = await db.ref('leagues/' + leagueCode + '/lastSyncDate').once('value');
-    const lastSync = lastSyncSnap.val();
-    const startDate = lastSync || new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
     const today = new Date().toISOString().slice(0, 10);
-    const dates = dateRange(startDate, today);
+    const weekStart = league.weekStart;
+    const weekEnd = league.weekEnd;
+    if (!weekStart || !weekEnd) {
+      status.textContent = 'Set week start and end dates in Admin before syncing.';
+      btn.disabled = false;
+      return;
+    }
+    const endDate = weekEnd < today ? weekEnd : today;
+    const dates = dateRange(weekStart, endDate);
 
     const allSports = [...new Set(Object.values(rostered).map(r => r.player.sport))];
     const activeSports = allSports.filter(s => SPORT_API[s]);
