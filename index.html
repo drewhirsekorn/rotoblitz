@@ -424,22 +424,25 @@ input,select,textarea,button{font-family:var(--font-body);font-size:14px}
       <div class="card">
         <div class="card-title">Create challenge</div>
         <div class="admin-grid">
-          <div class="field field-full"><label>Challenge name</label><input type="text" id="ch-name" placeholder="e.g. HR Challenge"></div>
-          <div class="field"><label>Stat to track</label><input type="text" id="ch-stat" placeholder="HR, PTS, REB, AST, G, K"></div>
-          <div class="field"><label>Sport</label><select id="ch-sport" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:6px;width:100%"><option value="mlb">MLB</option><option value="nba">NBA</option><option value="nhl">NHL</option><option value="nfl">NFL</option></select></div>
-          <div class="field"><label>Week start</label><input type="date" id="ch-week-start"></div>
-          <div class="field"><label>Week end</label><input type="date" id="ch-week-end"></div>
+          <div class="field field-full"><label>Title</label><input type="text" id="ch-title" placeholder="e.g. HR Challenge Week 1"></div>
+          <div class="field field-full"><label>Description</label><input type="text" id="ch-desc" placeholder="e.g. Most home runs this week wins the bonus"></div>
+          <div class="field field-full"><label>Stat category</label><select id="ch-cat" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;width:100%">
+            <option value="mlb_hr">MLB — Home Runs</option>
+            <option value="mlb_hits">MLB — Hits</option>
+            <option value="mlb_rbi">MLB — RBI</option>
+            <option value="mlb_sb">MLB — Stolen Bases</option>
+            <option value="mlb_k">MLB — Strikeouts (pitcher)</option>
+            <option value="nba_pts">NBA — Points</option>
+            <option value="nba_reb">NBA — Rebounds</option>
+            <option value="nba_ast">NBA — Assists</option>
+            <option value="nhl_goals">NHL — Goals</option>
+            <option value="nhl_ast">NHL — Assists</option>
+            <option value="mls_goals">MLS — Goals</option>
+          </select></div>
+          <div class="field"><label>Base pts per stat unit</label><input type="number" id="ch-base-pts" placeholder="e.g. 5" min="0" step="0.5"></div>
+          <div class="field"><label>Bonus pts for winner</label><input type="number" id="ch-bonus-pts" placeholder="e.g. 25" min="0"></div>
         </div>
-        <button class="btn btn-ghost btn-block" onclick="createChallenge()">Create challenge</button>
-      </div>
-      <div class="card">
-        <div class="card-title">Current week</div>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:10px">Sync will only collect points for games completed within this date range.</p>
-        <div class="admin-grid">
-          <div class="field"><label>Week start</label><input type="date" id="week-start-input"></div>
-          <div class="field"><label>Week end</label><input type="date" id="week-end-input"></div>
-        </div>
-        <button class="btn btn-ghost btn-block" onclick="saveWeekDates()">Save week dates</button>
+        <button class="btn btn-ghost btn-block" onclick="createChallenge()">Create challenge (24-hr window opens now)</button>
       </div>
       <div class="card">
         <div class="card-title">Rename league</div>
@@ -586,14 +589,7 @@ function renderAll(league) {
   renderLog(league);
   renderTicker(league);
   renderChallenges(league);
-  const wsEl = document.getElementById('week-start-input');
-  const weEl = document.getElementById('week-end-input');
-  if (wsEl) wsEl.value = league.weekStart || '';
-  if (weEl) weEl.value = league.weekEnd || '';
-  const chsEl = document.getElementById('ch-week-start');
-  const cheEl = document.getElementById('ch-week-end');
-  if (chsEl && !chsEl.value) chsEl.value = league.weekStart || '';
-  if (cheEl && !cheEl.value) cheEl.value = league.weekEnd || '';
+  checkWeekReset(league);
 }
 
 function renderTicker(league) {
@@ -676,9 +672,11 @@ function renderRoster(league) {
     '<div class="roster-row">' +
       '<span class="sport-dot" style="background:' + (SPORT_COLORS[p.sport]||'#aaa') + '"></span>' +
       (p.photo ? '<img src="' + p.photo + '" style="width:32px;height:32px;border-radius:50%;object-fit:cover;margin-right:4px" onerror="this.style.display=\'none\'">' : '') +
-      '<div class="flex1"><div class="roster-name" ' + (p.id && SPORT_API[p.sport] ? 'onmouseenter="showPlayerCard(event,\'' + p.id + '\',\'' + p.sport + '\')" onmouseleave="hidePlayerCard()"' : '') + '>' + p.name + '</div>' +
-      '<div style="font-size:12px;color:var(--muted)">' + (p.sport||'').toUpperCase() + ' · ' + (p.pos||'') + '</div></div>' +
-      '<button class="drop-btn" onclick="dropPlayer(\'' + encodeURIComponent(key) + '\')" title="Drop">&#10005;</button>' +
+      '<div class="flex1"><div class="roster-name" ' + (p.id && SPORT_API[p.sport] ? 'onmouseenter="showPlayerCard(event,\'' + p.id + '\',\'' + p.sport + '\')" onmouseleave="hidePlayerCard()"' : '') + '>' + p.name + (p.lockedByChallenge ? ' <span style="font-size:11px">&#128274;</span>' : '') + '</div>' +
+      '<div style="font-size:12px;color:var(--muted)">' + (p.sport||'').toUpperCase() + ' \xb7 ' + (p.pos||'') + (p.lockedByChallenge ? ' \xb7 <span style="color:var(--accent2)">' + ((league.challenges||{})[p.lockedByChallenge]?.title || 'challenge') + '</span>' : '') + '</div></div>' +
+      (p.lockedByChallenge
+        ? '<button class="drop-btn" disabled title="Locked in: ' + ((league.challenges||{})[p.lockedByChallenge]?.title || 'a challenge') + '" style="opacity:.35;cursor:not-allowed">&#128274;</button>'
+        : '<button class="drop-btn" onclick="dropPlayer(\'' + encodeURIComponent(key) + '\')" title="Drop">&#10005;</button>') +
     '</div>').join('');
 }
 
@@ -710,93 +708,121 @@ function renderChallenges(league) {
   if (!el) return;
   const challenges = Object.entries(league.challenges || {});
   if (!challenges.length) {
-    el.innerHTML = '<div class="empty"><div class="empty-icon">&#127919;</div>No challenges yet &mdash; admin can create one</div>';
+    el.innerHTML = '<div class="empty"><div class="empty-icon">&#127919;</div>No challenges this week &mdash; check Admin to create one</div>';
     return;
   }
-  const today = new Date().toISOString().slice(0, 10);
-  challenges.sort((a, b) => (b[1].weekStart || '') > (a[1].weekStart || '') ? 1 : -1);
+  const now = Date.now();
+  challenges.sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
   el.innerHTML = challenges.map(([cid, ch]) => {
-    const entries = Object.entries(ch.entries || {});
-    const isActive = ch.weekStart <= today && today <= (ch.weekEnd || today);
-    const isEnded = today > (ch.weekEnd || '');
-    const myEntry = (ch.entries || {})[myName];
-    const sorted = entries.slice().sort((a, b) => (b[1].total || 0) - (a[1].total || 0));
-    const badge = isActive
-      ? '<span style="background:rgba(61,214,140,.15);color:#3dd68c;font-size:11px;padding:2px 8px;border-radius:10px;margin-left:8px">LIVE</span>'
-      : isEnded
-        ? '<span style="background:var(--surface2);color:var(--muted);font-size:11px;padding:2px 8px;border-radius:10px;margin-left:8px">ENDED</span>'
-        : '<span style="background:rgba(245,166,35,.15);color:#f5a623;font-size:11px;padding:2px 8px;border-radius:10px;margin-left:8px">UPCOMING</span>';
-    const leaderboard = sorted.length
-      ? sorted.map(([mn, e], i) =>
-          '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">' +
-          '<div style="font-size:18px;font-weight:700;color:var(--muted);min-width:28px">' + (i+1) + '</div>' +
-          '<div style="flex:1"><div style="font-weight:600">' + mn + '</div>' +
-          '<div style="font-size:12px;color:var(--muted)">' + (e.playerName || '&#8212;') + '</div></div>' +
-          '<div style="font-size:26px;font-weight:700;color:var(--accent)">' + (e.total || 0) + '</div>' +
-          '<div style="font-size:12px;color:var(--muted);margin-left:2px">' + ch.stat + '</div></div>'
-        ).join('')
-      : '<div class="empty" style="padding:1rem">No entries yet</div>';
-    const myRosterOptions = Object.entries(league.members?.[myName]?.roster || {})
-      .filter(([, p]) => p.sport === ch.sport)
-      .map(([k, p]) => '<option value="' + encodeURIComponent(k) + '">' + p.name + '</option>')
-      .join('');
-    const entrySection = isActive
-      ? (myEntry
-          ? '<div style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:14px;display:flex;align-items:center;gap:10px">' +
-            '<span style="font-size:18px">&#128274;</span>' +
-            '<div><div style="font-weight:600">' + myEntry.playerName + '</div>' +
-            '<div style="font-size:12px;color:var(--muted)">Locked in &mdash; ' + (myEntry.total || 0) + ' ' + ch.stat + ' this week</div></div></div>'
-          : '<div style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:14px">' +
-            '<div style="font-size:13px;color:var(--muted);margin-bottom:8px">Pick your player for this challenge:</div>' +
-            '<div style="display:flex;gap:8px">' +
-            '<select id="ch-pick-' + cid + '" style="flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:6px">' +
-            '<option value="">&#8212; pick a player &#8212;</option>' + myRosterOptions + '</select>' +
-            '<button class="btn btn-accent" onclick="enterChallenge(\'' + cid + '\')">Enter</button></div>' +
-            (myRosterOptions ? '' : '<div style="font-size:12px;color:var(--muted);margin-top:6px">No ' + ch.sport.toUpperCase() + ' players on your roster</div>') +
-            '</div>'
-        )
+    if (!ch.title && !ch.statCategory) return '';
+    const catInfo = STAT_CATEGORY[ch.statCategory] || {};
+    const isOpen = now < (ch.closedAt || Infinity);
+    const myAssignment = (ch.assignments || {})[myName];
+    const assignments = Object.entries(ch.assignments || {});
+    const sorted = assignments.slice().sort((a, b) => (b[1].statTotal || 0) - (a[1].statTotal || 0));
+    const badge = isOpen
+      ? '<span style="background:rgba(61,214,140,.15);color:#3dd68c;font-size:11px;padding:2px 8px;border-radius:10px;margin-left:8px">OPEN</span>'
+      : '<span style="background:var(--surface2);color:var(--muted);font-size:11px;padding:2px 8px;border-radius:10px;margin-left:8px">CLOSED</span>';
+    let windowLine = '';
+    if (isOpen) {
+      const remaining = ch.closedAt - now;
+      const h = Math.floor(remaining / 3600000), m = Math.floor((remaining % 3600000) / 60000);
+      windowLine = '<div style="font-size:12px;color:var(--accent2);margin-bottom:10px">&#9201; ' + (h > 0 ? h + 'h ' : '') + m + 'm left to assign</div>';
+    } else {
+      windowLine = '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Assignment window closed</div>';
+    }
+    const eligibleOptions = isOpen && !myAssignment
+      ? Object.entries(league.members?.[myName]?.roster || {})
+          .filter(([, p]) => p.sport === catInfo.sport && !p.lockedByChallenge)
+          .map(([k, p]) => '<option value="' + encodeURIComponent(k).replace(/'/g,'%27') + '">' + p.name + '</option>')
+          .join('')
       : '';
+    let mySection = '';
+    if (isOpen && !myAssignment) {
+      mySection = '<div style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:14px">' +
+        '<div style="font-size:13px;color:var(--muted);margin-bottom:8px">Assign your player (' + (catInfo.sport || '').toUpperCase() + '):</div>' +
+        (eligibleOptions
+          ? '<div style="display:flex;gap:8px"><select id="ch-pick-' + cid + '" style="flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:6px"><option value="">&#8212; pick a player &#8212;</option>' + eligibleOptions + '</select><button class="btn btn-accent" onclick="assignPlayerToChallenge(\'' + cid + '\')">Assign</button></div>'
+          : '<div style="font-size:12px;color:var(--muted)">No eligible unlocked ' + (catInfo.sport || '').toUpperCase() + ' players on your roster</div>') +
+        '</div>';
+    } else if (myAssignment) {
+      mySection = '<div style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:14px;display:flex;align-items:center;gap:10px">' +
+        '<span style="font-size:18px">&#128274;</span>' +
+        '<div><div style="font-weight:600">' + myAssignment.playerName + '</div>' +
+        '<div style="font-size:12px;color:var(--muted)">Locked in &mdash; ' + (myAssignment.statTotal || 0) + ' ' + (catInfo.statLabel || ch.statCategory) + ' &middot; ' + Math.round((myAssignment.statTotal || 0) * (ch.basePts || 0) * 10) / 10 + ' proj pts</div></div></div>';
+    }
+    const leaderboard = sorted.length
+      ? sorted.map(([mn, a], i) => {
+          const projPts = Math.round((a.statTotal || 0) * (ch.basePts || 0) * 10) / 10;
+          return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">' +
+            '<div style="font-size:18px;font-weight:700;color:var(--muted);min-width:28px">' + (i + 1) + '</div>' +
+            '<div style="flex:1"><div style="font-weight:600">' + mn + (mn === myName ? ' <span class="you-tag">you</span>' : '') + '</div>' +
+            '<div style="font-size:12px;color:var(--muted)">' + (a.playerName || '&#8212;') + '</div></div>' +
+            '<div style="text-align:right"><div style="font-family:var(--font-head);font-size:20px;font-weight:800;color:var(--accent)">' + (a.statTotal || 0) + '</div>' +
+            '<div style="font-size:11px;color:var(--muted)">' + (catInfo.statLabel || ch.statCategory) + '</div></div>' +
+            '<div style="text-align:right;min-width:48px"><div style="font-family:var(--font-head);font-size:15px;font-weight:700;color:var(--accent2)">' + projPts + '</div>' +
+            '<div style="font-size:11px;color:var(--muted)">pts</div></div></div>';
+        }).join('')
+      : '<div class="empty" style="padding:1rem">No assignments yet</div>';
     return '<div class="card">' +
-      '<div class="card-title">' + ch.name + badge + '</div>' +
-      '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">' + ch.weekStart + ' &rarr; ' + ch.weekEnd + ' &nbsp;&middot;&nbsp; Track: ' + ch.stat + '</div>' +
-      entrySection + leaderboard + '</div>';
+      '<div class="card-title">' + ch.title + badge + '</div>' +
+      (ch.description ? '<div style="font-size:13px;color:var(--muted);margin-bottom:10px">' + ch.description + '</div>' : '') +
+      '<div style="font-size:12px;color:var(--muted);margin-bottom:8px">' + (catInfo.label || ch.statCategory) + ' &nbsp;&middot;&nbsp; ' + (ch.basePts || 0) + ' pts/unit &nbsp;&middot;&nbsp; ' + (ch.bonusPts || 0) + ' bonus for winner &nbsp;&middot;&nbsp; Week ' + (ch.weekNumber || 1) + '</div>' +
+      windowLine + mySection + leaderboard + '</div>';
   }).join('');
 }
 
-async function enterChallenge(challengeId) {
+async function assignPlayerToChallenge(challengeId) {
   const sel = document.getElementById('ch-pick-' + challengeId);
   if (!sel || !sel.value) { toast('Pick a player first'); return; }
   const key = decodeURIComponent(sel.value);
   const ch = _lastLeague?.challenges?.[challengeId];
   if (!ch) { toast('Challenge not found'); return; }
-  const today = new Date().toISOString().slice(0, 10);
-  if (today > (ch.weekEnd || '')) { toast('Challenge has ended'); return; }
-  if ((_lastLeague?.challenges?.[challengeId]?.entries || {})[myName]) { toast('Already entered'); return; }
+  if (Date.now() >= (ch.closedAt || 0)) { toast('Assignment window closed'); return; }
+  if ((ch.assignments || {})[myName]) { toast('Already assigned'); return; }
   const player = _lastLeague?.members?.[myName]?.roster?.[key];
   if (!player) { toast('Player not found'); return; }
+  if (player.lockedByChallenge) {
+    const lockedCh = _lastLeague?.challenges?.[player.lockedByChallenge];
+    toast(player.name + ' is locked in: ' + (lockedCh?.title || 'another challenge'));
+    return;
+  }
   setSyncing(true);
-  await db.ref('leagues/' + leagueCode + '/challenges/' + challengeId + '/entries/' + myName).set({
+  const updates = {};
+  updates['challenges/' + challengeId + '/assignments/' + myName] = {
     playerName: player.name,
     playerId: player.id || '',
+    assignedAt: Date.now(),
+    statTotal: 0,
+    statPoints: 0,
+    bonusPoints: 0,
     total: 0
-  });
+  };
+  updates['members/' + myName + '/roster/' + key + '/lockedByChallenge'] = challengeId;
+  await db.ref('leagues/' + leagueCode).update(updates);
   setSyncing(false);
-  toast(player.name + ' entered!');
+  toast(player.name + ' assigned!');
 }
 
 async function createChallenge() {
-  const name = document.getElementById('ch-name').value.trim();
-  const stat = document.getElementById('ch-stat').value.trim().toUpperCase();
-  const sport = document.getElementById('ch-sport').value;
-  const wStart = document.getElementById('ch-week-start').value;
-  const wEnd = document.getElementById('ch-week-end').value;
-  if (!name || !stat || !sport || !wStart || !wEnd) { toast('Fill all fields'); return; }
-  if (wStart > wEnd) { toast('Start must be before end'); return; }
+  const title = document.getElementById('ch-title').value.trim();
+  const desc = document.getElementById('ch-desc').value.trim();
+  const statCategory = document.getElementById('ch-cat').value;
+  const basePts = parseFloat(document.getElementById('ch-base-pts').value) || 0;
+  const bonusPts = parseFloat(document.getElementById('ch-bonus-pts').value) || 0;
+  if (!title) { toast('Enter a challenge title'); return; }
+  if (basePts <= 0 && bonusPts <= 0) { toast('Set at least one point value'); return; }
+  const now = Date.now();
   setSyncing(true);
-  await db.ref('leagues/' + leagueCode + '/challenges').push({ name, stat, sport, weekStart: wStart, weekEnd: wEnd });
-  document.getElementById('ch-name').value = '';
+  await db.ref('leagues/' + leagueCode + '/challenges').push({
+    title, description: desc, statCategory, basePts, bonusPts,
+    createdAt: now, closedAt: now + 86400000,
+    weekNumber: _lastLeague?.week || 1
+  });
+  document.getElementById('ch-title').value = '';
+  document.getElementById('ch-desc').value = '';
   setSyncing(false);
-  toast('Challenge created!');
+  toast('Challenge created! 24-hour assignment window is open.');
 }
 
 async function syncChallengeStats(league, status) {
@@ -804,23 +830,22 @@ async function syncChallengeStats(league, status) {
   if (!challenges.length) return;
   const today = new Date().toISOString().slice(0, 10);
   for (const [cid, ch] of challenges) {
-    if (!ch.entries || !ch.sport || !ch.stat || !ch.weekStart) continue;
-    if (ch.weekStart > today) continue;
-    const cfg = SPORT_API[ch.sport];
+    if (!ch.assignments || !ch.statCategory || !ch.createdAt) continue;
+    const catInfo = STAT_CATEGORY[ch.statCategory];
+    if (!catInfo) continue;
+    const cfg = SPORT_API[catInfo.sport];
     if (!cfg) continue;
-    const statFn = CHALLENGE_STAT_FN[ch.stat.toUpperCase()];
-    if (!statFn) continue;
     const entryMap = {};
-    for (const [mn, entry] of Object.entries(ch.entries)) {
-      if (entry.playerId) entryMap[entry.playerId] = mn;
+    for (const [mn, a] of Object.entries(ch.assignments)) {
+      if (a.playerId) entryMap[a.playerId] = mn;
     }
     if (!Object.keys(entryMap).length) continue;
     const cgSnap = await db.ref('leagues/' + leagueCode + '/challenges/' + cid + '/gameSynced').once('value');
     const gameSynced = cgSnap.val() || {};
-    const chEnd = ch.weekEnd && ch.weekEnd < today ? ch.weekEnd : today;
-    const dates = dateRange(ch.weekStart, chEnd);
+    const startDate = new Date(ch.createdAt).toISOString().slice(0, 10);
+    const dates = dateRange(startDate, today);
     for (const dateStr of dates) {
-      if (status) status.textContent = ch.name + ': checking ' + dateStr.slice(0,4) + '-' + dateStr.slice(4,6) + '-' + dateStr.slice(6) + '...';
+      if (status) status.textContent = ch.title + ': ' + dateStr.slice(0,4) + '-' + dateStr.slice(4,6) + '-' + dateStr.slice(6) + '...';
       let scoreboardData;
       try {
         const res = await fetch('https://site.api.espn.com/apis/site/v2/sports/' + cfg.sport + '/' + cfg.league + '/scoreboard?dates=' + dateStr);
@@ -835,29 +860,29 @@ async function syncChallengeStats(league, status) {
           summary = await res2.json();
         } catch(e) { continue; }
         const gameContribs = {};
-        const players = summary.boxscore?.players || summary.boxscore?.teams || [];
-        for (const teamData of players) {
+        const boxPlayers = summary.boxscore?.players || summary.boxscore?.teams || [];
+        for (const teamData of boxPlayers) {
           for (const statGroup of (teamData.statistics || [])) {
             const names = statGroup.names || statGroup.keys || [];
-            const isPitching = names[0]?.toUpperCase() === 'IP' || names[0]?.toLowerCase().includes('inn');
-            if (ch.sport === 'mlb' && isPitching) continue;
+            const isPitchingRow = names[0]?.toUpperCase() === 'IP' || names[0]?.toLowerCase().includes('inn');
+            if (catInfo.batting === true && isPitchingRow) continue;
+            if (catInfo.pitching === true && !isPitchingRow) continue;
             for (const ath of (statGroup.athletes || [])) {
               const pid = ath.athlete?.id;
               if (!pid || !entryMap[pid]) continue;
-              const val = statFn(ath.stats || [], names);
+              const val = catInfo.fn(ath.stats || [], names);
               if (val) gameContribs[entryMap[pid]] = (gameContribs[entryMap[pid]] || 0) + val;
             }
           }
         }
         const writes = [];
         for (const [mn, val] of Object.entries(gameContribs)) {
-          const ref = db.ref('leagues/' + leagueCode + '/challenges/' + cid + '/entries/' + mn + '/total');
+          const ref = db.ref('leagues/' + leagueCode + '/challenges/' + cid + '/assignments/' + mn + '/statTotal');
           const snap = await ref.once('value');
           writes.push(ref.set((snap.val() || 0) + val));
         }
         writes.push(db.ref('leagues/' + leagueCode + '/challenges/' + cid + '/gameSynced/' + event.id).set(true));
-        if (writes.length > 1) await Promise.all(writes);
-        else await writes[0];
+        await Promise.all(writes);
       }
     }
   }
@@ -881,6 +906,12 @@ async function draftPlayer(encodedKey) {
 
 async function dropPlayer(encodedKey) {
   const key = decodeURIComponent(encodedKey);
+  const player = _lastLeague?.members?.[myName]?.roster?.[key];
+  if (player?.lockedByChallenge) {
+    const lockedCh = _lastLeague?.challenges?.[player.lockedByChallenge];
+    toast('Cannot drop ' + (player.name || 'player') + ' — locked in: ' + (lockedCh?.title || 'a challenge'));
+    return;
+  }
   setSyncing(true);
   const snap = await db.ref('leagues/' + leagueCode + '/members/' + myName + '/roster/' + key).once('value');
   if (!snap.exists()) { setSyncing(false); return; }
@@ -1005,19 +1036,6 @@ async function awardPoints() {
   toast('Awarded ' + pts + ' pts to ' + to);
 }
 
-async function saveWeekDates() {
-  const start = document.getElementById('week-start-input').value;
-  const end = document.getElementById('week-end-input').value;
-  if (!start || !end) { toast('Set both start and end dates'); return; }
-  if (start > end) { toast('Start must be before end'); return; }
-  setSyncing(true);
-  await Promise.all([
-    db.ref('leagues/' + leagueCode + '/weekStart').set(start),
-    db.ref('leagues/' + leagueCode + '/weekEnd').set(end)
-  ]);
-  setSyncing(false);
-  toast('Week dates saved');
-}
 
 async function resetAllScores() {
   if (!confirm('Reset ALL member scores to 0 and clear the points log? This cannot be undone.')) return;
@@ -1034,12 +1052,16 @@ async function resetAllScores() {
 }
 
 async function resetSyncCache() {
-  if (!confirm('Clear sync cache? This will re-process the current week on next sync.')) return;
+  if (!confirm('Clear challenge sync cache? Stats will be re-tallied from scratch on next sync.')) return;
   setSyncing(true);
-  await db.ref('leagues/' + leagueCode + '/synced').remove();
-  await db.ref('leagues/' + leagueCode + '/lastSyncDate').remove();
+  const snap = await db.ref('leagues/' + leagueCode + '/challenges').once('value');
+  const challenges = snap.val() || {};
+  const writes = Object.keys(challenges).map(cid =>
+    db.ref('leagues/' + leagueCode + '/challenges/' + cid + '/gameSynced').remove()
+  );
+  if (writes.length) await Promise.all(writes);
   setSyncing(false);
-  toast('Sync cache cleared — click Sync to re-process games.');
+  toast('Sync cache cleared — click Sync to re-tally.');
 }
 
 async function renameLeague() {
@@ -1080,13 +1102,18 @@ const SPORT_API = {
   nfl: { sport: 'football',  league: 'nfl' },
   mls: { sport: 'soccer',    league: 'usa.1' },
 };
-const CHALLENGE_STAT_FN = {
-  HR:  (stats, names) => getStat(stats, names, 'HR'),
-  PTS: (stats, names) => getStat(stats, names, 'PTS'),
-  REB: (stats, names) => getStat(stats, names, 'REB'),
-  AST: (stats, names) => getStat(stats, names, 'AST'),
-  G:   (stats, names) => getStat(stats, names, 'G', 'goals'),
-  K:   (stats, names) => getStat(stats, names, 'K', 'SO'),
+const STAT_CATEGORY = {
+  mlb_hr:   { sport:'mlb', label:'MLB Home Runs',           statLabel:'HR',  batting:true,  fn:(s,n)=>getStat(s,n,'HR') },
+  mlb_hits: { sport:'mlb', label:'MLB Hits',                statLabel:'H',   batting:true,  fn:(s,n)=>getStat(s,n,'H') },
+  mlb_rbi:  { sport:'mlb', label:'MLB RBI',                 statLabel:'RBI', batting:true,  fn:(s,n)=>getStat(s,n,'RBI') },
+  mlb_sb:   { sport:'mlb', label:'MLB Stolen Bases',        statLabel:'SB',  batting:true,  fn:(s,n)=>getStat(s,n,'SB') },
+  mlb_k:    { sport:'mlb', label:'MLB Strikeouts (pitcher)',statLabel:'K',   pitching:true, fn:(s,n)=>getStat(s,n,'K','SO') },
+  nba_pts:  { sport:'nba', label:'NBA Points',              statLabel:'PTS', fn:(s,n)=>getStat(s,n,'PTS') },
+  nba_reb:  { sport:'nba', label:'NBA Rebounds',            statLabel:'REB', fn:(s,n)=>getStat(s,n,'REB') },
+  nba_ast:  { sport:'nba', label:'NBA Assists',             statLabel:'AST', fn:(s,n)=>getStat(s,n,'AST') },
+  nhl_goals:{ sport:'nhl', label:'NHL Goals',               statLabel:'G',   fn:(s,n)=>getStat(s,n,'G','goals') },
+  nhl_ast:  { sport:'nhl', label:'NHL Assists',             statLabel:'A',   fn:(s,n)=>getStat(s,n,'A','assists') },
+  mls_goals:{ sport:'mls', label:'MLS Goals',               statLabel:'G',   fn:(s,n)=>getStat(s,n,'G','goals') },
 };
 
 function getStat(stats, names, ...candidates) {
@@ -1204,6 +1231,112 @@ async function syncScores() {
   btn.disabled = false;
 }
 // ─────────────────────────────────────────────────────────────────────────────
+
+function getLastSundayResetTS() {
+  const now = Date.now();
+  for (let d = 0; d <= 7; d++) {
+    const t = now - d * 86400000;
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour12: false
+    }).formatToParts(t);
+    const get = type => (parts.find(p => p.type === type) || {}).value || '';
+    if (get('weekday') !== 'Sun') continue;
+    const yr = parseInt(get('year')), mo = parseInt(get('month')), dy = parseInt(get('day'));
+    for (const utcHour of [3, 4]) {
+      const candidate = Date.UTC(yr, mo - 1, dy + 1, utcHour, 59, 0);
+      const check = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false
+      }).formatToParts(candidate);
+      const cGet = type => (check.find(p => p.type === type) || {}).value || '';
+      if (cGet('weekday') === 'Sun' && cGet('hour') === '23' && cGet('minute') === '59') {
+        if (candidate <= now) return candidate;
+      }
+    }
+  }
+  return null;
+}
+
+let _weekResetRunning = false;
+async function checkWeekReset(league) {
+  if (_weekResetRunning) return;
+  const resetTS = getLastSundayResetTS();
+  if (!resetTS) return;
+  if (league.lastProcessed && league.lastProcessed >= resetTS) return;
+  if (!Object.keys(league.challenges || {}).length) {
+    if (!league.lastProcessed || league.lastProcessed < resetTS) {
+      await db.ref('leagues/' + leagueCode + '/lastProcessed').set(Date.now());
+    }
+    return;
+  }
+  _weekResetRunning = true;
+  try {
+    let claimed = false;
+    await db.ref('leagues/' + leagueCode + '/lastProcessed').transaction(current => {
+      if (current && current >= resetTS) return;
+      claimed = true;
+      return Date.now();
+    });
+    if (claimed) {
+      const snap = await db.ref('leagues/' + leagueCode).once('value');
+      await runWeekReset(snap.val());
+    }
+  } catch(e) {
+    console.error('[weekReset]', e);
+  } finally {
+    _weekResetRunning = false;
+  }
+}
+
+async function runWeekReset(league) {
+  await syncChallengeStats(league, null);
+  const snap = await db.ref('leagues/' + leagueCode).once('value');
+  league = snap.val();
+  const now = Date.now();
+  const updates = {};
+  const memberScores = {};
+  for (const [mn, member] of Object.entries(league.members || {})) {
+    memberScores[mn] = member.score || 0;
+  }
+  for (const [cid, ch] of Object.entries(league.challenges || {})) {
+    const assignments = Object.entries(ch.assignments || {});
+    if (!assignments.length) continue;
+    let topMember = null, topStat = -1;
+    for (const [mn, a] of assignments) {
+      if ((a.statTotal || 0) > topStat) { topStat = a.statTotal || 0; topMember = mn; }
+    }
+    for (const [mn, a] of assignments) {
+      const statPts = Math.round((a.statTotal || 0) * (ch.basePts || 0) * 10) / 10;
+      const bonusPts = (mn === topMember && topStat > 0) ? (ch.bonusPts || 0) : 0;
+      const total = Math.round((statPts + bonusPts) * 10) / 10;
+      if (total > 0) {
+        memberScores[mn] = Math.round(((memberScores[mn] || 0) + total) * 10) / 10;
+        const logKey = db.ref('leagues/' + leagueCode + '/log').push().key;
+        updates['log/' + logKey] = {
+          to: mn, pts: total,
+          desc: ch.title + ': ' + a.playerName + (bonusPts > 0 ? ' (+' + bonusPts + ' winner bonus)' : ''),
+          ts: now
+        };
+      }
+    }
+  }
+  for (const [mn, score] of Object.entries(memberScores)) {
+    updates['members/' + mn + '/score'] = score;
+  }
+  for (const [mn, member] of Object.entries(league.members || {})) {
+    for (const [pk, player] of Object.entries(member.roster || {})) {
+      if (player.lockedByChallenge) {
+        updates['members/' + mn + '/roster/' + pk + '/lockedByChallenge'] = null;
+      }
+    }
+  }
+  updates['challenges'] = null;
+  updates['week'] = (league.week || 1) + 1;
+  updates['lastProcessed'] = now;
+  await db.ref('leagues/' + leagueCode).update(updates);
+}
 
 // Auto-login
 const savedName = localStorage.getItem('rl_name');
